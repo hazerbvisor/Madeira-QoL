@@ -15,9 +15,9 @@ struct PerformanceProfileSettings: View {
             Picker("Precise FPS cap", selection: Binding(get: { profile.wrappedValue.fpsCap ?? -1 }, set: {
                 var value = profile.wrappedValue; value.fpsCap = $0 < 0 ? nil : $0; profile.wrappedValue = value
             })) {
-                Text("Use existing FPS limit").tag(-1)
+                Text(profile.wrappedValue.automaticPerformance ? "Auto default (30 FPS)" : "Use existing FPS limit").tag(-1)
                 ForEach(PerformanceProfile.fpsCaps.filter { $0 <= UIScreen.main.maximumFramesPerSecond }, id: \.self) { cap in
-                    Text(cap == 0 ? "Unlimited" : "\(cap) FPS").tag(cap)
+                    Text(cap == 0 ? (profile.wrappedValue.automaticPerformance ? "Unlimited request (Auto uses 30 FPS)" : "Unlimited") : "\(cap) FPS").tag(cap)
                 }
             }.disabled(madeira_performance_renderer_available() == 0)
             Text("Uses absolute frame deadlines and respects slower game-requested pacing. Display refresh and thermal limits may reduce visible FPS.")
@@ -46,7 +46,7 @@ struct PerformanceProfileSettings: View {
             Text("Capture releases when you open Madeira menus, edit touch controls, leave the game, or background the app. Pointer lock requires a raw mouse stream and a fullscreen iPad scene.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        MadeiraFXSettings(profile: profile, outputResolution: entry.resolution, desktop: entry.desktop == true)
+        MadeiraFXSettings(profile: profile, outputResolution: entry.resolution, compatible: entry.spatialCompatible)
         RendererCacheSettings(entry: entry)
     }
 }
@@ -54,12 +54,13 @@ struct PerformanceProfileSettings: View {
 struct MadeiraFXSettings: View {
     @Binding var profile: PerformanceProfile
     var outputResolution: String
-    var desktop: Bool
-    private var supported: Bool { !desktop && madeira_spatial_supported() != 0 }
+    var compatible: Bool
+    private var supported: Bool { compatible && madeira_spatial_supported() != 0 }
     var body: some View {
         Section("MadeiraFX") {
             Picker("Spatial preset", selection: Binding(get: { profile.fxMode }, set: {
                 profile.fxMode = $0; profile.renderScale = $0.recommendedScale; profile.nextLaunchScale = nil; profile.normalize()
+                if $0 == .auto { profile.automaticPerformance = true }
             })) {
                 ForEach(MadeiraFXMode.allCases, id: \.self) { Text($0.label).tag($0) }
             }.disabled(!supported)
@@ -67,7 +68,7 @@ struct MadeiraFXSettings: View {
                 if profile.minimumScale < profile.maximumScale {
                     Slider(value: Binding(get: { profile.renderScale }, set: { profile.renderScale = $0; profile.nextLaunchScale = nil }), in: profile.minimumScale...profile.maximumScale) { Text("Internal render scale") }
                 }
-                Text("Requested internal: \(internalResolution) · Output target: \(outputResolution.replacingOccurrences(of: "x", with: "×")) · \(Int(profile.renderScale * 100))%")
+                Text("Requested internal: \(internalResolution) · Output target: \(outputResolution.replacingOccurrences(of: "x", with: "×")) · \(Int(profile.requestedRenderScale * 100))%")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("The game must honor the lower session resolution. Actual dimensions and active upscaling appear in diagnostics. Changes apply at the next launch.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -83,7 +84,7 @@ struct MadeiraFXSettings: View {
                     }
                 }
             } else if !supported {
-                Text("MetalFX Spatial is unavailable for this device or desktop session. Original rendering and resolution are retained.")
+                Text("Spatial requires a supported device and native 32-bit Direct3D 9. D3D11, emulated D3D9 and desktop sessions retain original rendering and resolution.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Text("Temporal reconstruction and frame interpolation are unavailable: the presentation path does not provide trustworthy motion vectors, depth and camera jitter.")

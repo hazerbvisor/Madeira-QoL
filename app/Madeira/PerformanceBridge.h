@@ -24,7 +24,9 @@ void madeira_performance_note_generated_encode(void);
 int madeira_performance_renderer_available(void);
 int madeira_spatial_supported(void);
 int madeira_spatial_configure(int enabled, int width, int height);
-void madeira_spatial_adjust_size(double *width, double *height);
+void madeira_spatial_native_props(int active);
+int madeira_spatial_native_props_active(void);
+void madeira_spatial_adjust_size(int native, double *width, double *height);
 int madeira_spatial_encode(uintptr_t buffer, uintptr_t input, uintptr_t output,
                            uintptr_t fence, int compatible);
 void madeira_performance_renderer_connected(void);

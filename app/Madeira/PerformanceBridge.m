@@ -23,6 +23,7 @@ static unsigned archiveRecords;
 static _Atomic unsigned pendingArchiveRecords;
 static _Atomic int cachePressure;
 static _Atomic int spatialEnabled, outputWidth, outputHeight;
+static _Thread_local unsigned nativePropsDepth;
 static pthread_mutex_t spatialLock = PTHREAD_MUTEX_INITIALIZER;
 static id<MTLFXSpatialScaler> spatialScaler;
 static NSUInteger scalerDimensions[6];
@@ -44,8 +45,14 @@ int madeira_spatial_configure(int enabled, int width, int height) {
     return supported;
 }
 
-void madeira_spatial_adjust_size(double *width, double *height) {
-    if (!atomic_load(&spatialEnabled) || !width || !height || *width <= 0 || *height <= 0) return;
+void madeira_spatial_native_props(int active) {
+    if (active) nativePropsDepth++;
+    else if (nativePropsDepth) nativePropsDepth--;
+}
+int madeira_spatial_native_props_active(void) { return nativePropsDepth > 0; }
+
+void madeira_spatial_adjust_size(int native, double *width, double *height) {
+    if (!native || !atomic_load(&spatialEnabled) || !width || !height || !isfinite(*width) || !isfinite(*height) || *width <= 0 || *height <= 0) return;
     double factor = MIN((double)atomic_load(&outputWidth) / *width,
                         (double)atomic_load(&outputHeight) / *height);
     // Preserve unusual swapchain aspect ratios; never resize the game's resources.
@@ -54,11 +61,17 @@ void madeira_spatial_adjust_size(double *width, double *height) {
 
 int madeira_spatial_encode(uintptr_t command, uintptr_t inputHandle, uintptr_t outputHandle,
                           uintptr_t fenceHandle, int compatible) {
+    // The diagnostic remote backend uses tagged handles, not local Obj-C
+    // pointers. Never message them, including for telemetry/fallback sizing.
+    const char *remote = getenv("DXMT_REMOTE_METAL");
+    if (remote && *remote) return 0;
     id<MTLCommandBuffer> buffer = (__bridge id<MTLCommandBuffer>)(void *)command;
     id<MTLTexture> input = (__bridge id<MTLTexture>)(void *)inputHandle;
     id<MTLTexture> output = (__bridge id<MTLTexture>)(void *)outputHandle;
     BOOL encoded = NO;
     if (atomic_load(&spatialEnabled) && !atomic_load(&cachePressure) && compatible && input && output &&
+        (input.pixelFormat == MTLPixelFormatBGRA8Unorm || input.pixelFormat == MTLPixelFormatRGBA8Unorm) &&
+        (output.pixelFormat == MTLPixelFormatBGRA8Unorm || output.pixelFormat == MTLPixelFormatRGBA8Unorm) &&
         input.width < output.width && input.height < output.height &&
         input.sampleCount == 1 && output.sampleCount == 1 &&
         input.textureType == MTLTextureType2D && output.textureType == MTLTextureType2D) {
@@ -106,6 +119,8 @@ static dispatch_queue_t cacheQueue(void) {
 __attribute__((weak)) int madeira_dxmt_performance_hooks_v1(void) { return 0; }
 void madeira_performance_renderer_connected(void) { atomic_store(&connected, 1); }
 int madeira_performance_renderer_available(void) {
+    const char *remote = getenv("DXMT_REMOTE_METAL");
+    if (remote && *remote) return 0;
     return atomic_load(&connected) || madeira_dxmt_performance_hooks_v1();
 }
 void madeira_performance_set_cap(int value) { atomic_store(&cap, value); }
@@ -166,6 +181,7 @@ void madeira_performance_snapshot(MadeiraPerformanceSnapshot *out) {
     double sorted[128]; unsigned count;
     pthread_mutex_lock(&samplesLock);
     *out = metrics; count = sampleCount;
+    metrics.pipeline_ms = 0; // peak preparation time since the last observation
     memcpy(sorted, intervals, count * sizeof(double));
     pthread_mutex_unlock(&samplesLock);
     out->effective_cap = atomic_load(&cap);
@@ -183,7 +199,7 @@ void madeira_performance_note_pipeline(double ms) {
     if (!atomic_load(&telemetry)) return;
     pthread_mutex_lock(&samplesLock);
     metrics.pipeline_requests++;
-    metrics.pipeline_ms = ms;
+    metrics.pipeline_ms = MAX(metrics.pipeline_ms, ms);
     pthread_mutex_unlock(&samplesLock);
 }
 

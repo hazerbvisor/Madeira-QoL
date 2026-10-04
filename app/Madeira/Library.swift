@@ -247,10 +247,22 @@ struct LibraryEntry: Codable, Identifiable {
 
     var displayMode: DisplayMode { display.flatMap(DisplayMode.init(rawValue:)) ?? .fit }
 
+    /// The shipped 64-bit/D3D11 and emulated i386 Presenters live in guest DLLs.
+    /// They do not call the native spatial bridge; never resize their drawable.
+    var spatialCompatible: Bool {
+        let route = MadeiraConfig.get("d3d9") ?? MadeiraConfig.get("env.MADEIRA_D3D9")
+            ?? ProcessInfo.processInfo.environment["MADEIRA_D3D9"] ?? "emulated"
+        let remote = MadeiraConfig.get("remote") ?? MadeiraConfig.get("env.DXMT_REMOTE_METAL")
+            ?? ProcessInfo.processInfo.environment["DXMT_REMOTE_METAL"] ?? ""
+        return remote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && desktop != true && bits == 32 && graphicsAPI == "D3D9"
+            && route.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "native"
+    }
+
     /// A lower session monitor is a request to the game, not forced scaling of
     /// its render targets. Games may choose another mode; telemetry reports it.
     var sessionResolution: String {
-        guard desktop != true, let profile = performanceUpgrade, profile.fxMode != .off,
+        guard spatialCompatible, let profile = performanceUpgrade, profile.fxMode != .off,
               madeira_spatial_supported() != 0 else { return resolution }
         let size = resolution.split(separator: "x").compactMap { Int($0) }
         guard size.count == 2 else { return resolution }
@@ -333,7 +345,8 @@ struct LibraryEntry: Codable, Identifiable {
             setenv("MADEIRA_FASTSYNC", fastSync == false ? "0" : mode, 1)
             setenv("MADEIRA_FASTSYNC_SEM", semaphoreFastPath == true ? "1" : "0", 1)
         }
-        madeira_set_vsync_locked((performanceUpgrade?.initialFPSCap ?? -1) < 0 ? effectiveFPSMode : 0)
+        let precise = (performanceUpgrade?.initialFPSCap ?? -1) >= 0 && madeira_performance_renderer_available() != 0
+        madeira_set_vsync_locked(precise ? 0 : effectiveFPSMode)
         fputs("[frontend] launch profile applied\n", stderr)
         LogStore.shared.log("[display-shape] resolution=\(resolution) mode=\(displayMode.rawValue)")
     }
@@ -342,7 +355,7 @@ struct LibraryEntry: Codable, Identifiable {
     func configureLaunch() {
         let size = resolution.split(separator: "x").compactMap { Int($0) }
         let validDisplay = size.count == 2 && (320...4096).contains(size[0]) && (240...4096).contains(size[1])
-        let fx = validDisplay && desktop != true && performanceUpgrade?.fxMode != nil && performanceUpgrade?.fxMode != .off
+        let fx = validDisplay && spatialCompatible && performanceUpgrade?.fxMode != nil && performanceUpgrade?.fxMode != .off
         let spatial = madeira_spatial_configure(fx ? 1 : 0, validDisplay ? Int32(size[0]) : 0, validDisplay ? Int32(size[1]) : 0) != 0
         if spatial { setenv("DXMT_METALFX_SPATIAL_SWAPCHAIN", "0", 1) } // avoid two independent upscalers
         // "The game"'s identity and working folder for this launch only (the bridge

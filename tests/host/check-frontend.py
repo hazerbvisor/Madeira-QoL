@@ -91,14 +91,16 @@ var published: (Int32, Int32) = (0, 0)
 func winios_display_mode_changed(_ w: Int32, _ h: Int32) { published = (w, h) }
 var vsync: Int32 = -1
 func madeira_set_vsync_locked(_ mode: Int32) { vsync = mode }
+func madeira_performance_renderer_available() -> Int32 { 1 }
 enum ProMotionIntent { static var has30Cap = true }
 struct TouchControl: Codable, Equatable { var nx = 0.5 }
 enum ControlAction: Codable, Equatable, Hashable { case none }   // LibraryEntry.controllerBinds
 enum GamepadInput { static let keyboardMouseAvailable = true }   // LibraryEntry's per-game DirectInput choice
 enum LibraryError: LocalizedError { case message(String) }
 enum RendererCaches { static func prepare(_ entry: LibraryEntry) {} }
-func madeira_spatial_supported() -> Int32 { 0 }
-func madeira_spatial_configure(_ enabled: Int32, _ width: Int32, _ height: Int32) -> Int32 { 0 }
+var spatialDevice: Int32 = 0
+func madeira_spatial_supported() -> Int32 { spatialDevice }
+func madeira_spatial_configure(_ enabled: Int32, _ width: Int32, _ height: Int32) -> Int32 { enabled * spatialDevice }
 func env(_ name: String) -> String? { getenv(name).map { String(cString: $0) } }
 '''
 swift += (root / 'app/Madeira/PerformancePolicy.swift').read_text() + '\n'
@@ -256,6 +258,25 @@ unsupportedFX.performanceUpgrade?.fxMode = .quality
 unsupportedFX.performanceUpgrade?.renderScale = 0.85
 expect(unsupportedFX.sessionResolution == unsupportedFX.resolution,
        "unsupported MetalFX retains the original session resolution")
+spatialDevice = 1
+MadeiraConfig.values["d3d9"] = "native"
+var nativeFX = unsupportedFX; nativeFX.bits = 32; nativeFX.graphicsAPI = "D3D9"
+let nativeSize = nativeFX.performanceUpgrade!.internalResolution(outputWidth: 1560, outputHeight: 720)
+expect(nativeFX.spatialCompatible && nativeFX.sessionResolution == "\(nativeSize.width)x\(nativeSize.height)",
+       "native 32-bit D3D9 requests the explicit lower monitor")
+nativeFX.configureLaunch()
+expect(env("DXMT_METALFX_SPATIAL_SWAPCHAIN") == "0", "one host spatial path suppresses the independent guest upscaler")
+nativeFX.bits = 64
+expect(!nativeFX.spatialCompatible && nativeFX.sessionResolution == nativeFX.resolution, "64-bit guest Presenter retains original sizing")
+nativeFX.bits = 32; nativeFX.graphicsAPI = "D3D11"
+expect(!nativeFX.spatialCompatible, "D3D11 guest Presenter cannot use native spatial hooks")
+nativeFX.graphicsAPI = "D3D11/D3D9"
+expect(!nativeFX.spatialCompatible, "ambiguous mixed-API metadata cannot opt a guest Presenter into native spatial")
+nativeFX.graphicsAPI = "D3D9"; MadeiraConfig.values["d3d9"] = "emulated"
+expect(!nativeFX.spatialCompatible, "emulated i386 Presenter cannot use native spatial hooks")
+MadeiraConfig.values["d3d9"] = "native"; MadeiraConfig.values["remote"] = "diagnostic remote backend"
+expect(!nativeFX.spatialCompatible, "remote Metal handles are excluded from local MetalFX")
+MadeiraConfig.values["d3d9"] = nil; MadeiraConfig.values["remote"] = nil; spatialDevice = 0
 
 // Layout: the presented rect and the touch mapping for each mode.
 let guest = CGSize(width: 1280, height: 720), view = CGRect(x: 0, y: 0, width: 844, height: 390)

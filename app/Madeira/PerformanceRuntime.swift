@@ -41,13 +41,15 @@ final class PerformanceRuntime: ObservableObject, @unchecked Sendable {
     private var scalePolicy = AdaptiveRenderScalePolicy()
     private var fpsPolicy = AutoFPSPolicy()
     private var currentCap = -1
+    private var requestedFPS = 30
     private var lastCachePressure = -1
 
     func begin(_ entry: LibraryEntry) {
         dispatchPrecondition(condition: .onQueue(.main))
         stop()
         entryID = entry.id; profile = entry.performanceUpgrade ?? PerformanceProfile()
-        currentCap = profile.initialFPSCap
+        requestedFPS = PerformanceProfile.fpsCaps.filter { $0 > 0 && $0 <= profile.autoRequestedFPS && $0 <= ProMotionIntent.panelMaxFPS }.max() ?? 30
+        currentCap = profile.automaticPerformance ? min(profile.lastAutoFPS ?? requestedFPS, requestedFPS) : profile.initialFPSCap
         readout = PerformanceReadout(); active = true
         let center = NotificationCenter.default
         for name in [ProcessInfo.thermalStateDidChangeNotification, .NSProcessInfoPowerStateDidChange] {
@@ -175,10 +177,11 @@ final class PerformanceRuntime: ObservableObject, @unchecked Sendable {
             cpuPercent: cpuPercent, pipelineMS: pipeline, memory: memoryPressure, thermalSerious: thermalSerious,
             powerConstrained: ProcessInfo.processInfo.isLowPowerModeEnabled)
         if profile.automaticPerformance {
-            if let target = fpsPolicy.target(signals: signals, now: now, current: currentCap, requested: profile.autoRequestedFPS) {
+            if let target = fpsPolicy.target(signals: signals, now: now, current: currentCap, requested: requestedFPS) {
                 changeCap(target, reason: "Recovered gradually to \(target) FPS with measured headroom")
             }
-            if profile.fxMode != .off, madeira_spatial_supported() != 0,
+            if profile.fxMode != .off, LibraryModel.shared.activeEntry?.spatialCompatible == true,
+               snapshot.spatial_active != 0, madeira_spatial_supported() != 0,
                let scale = scalePolicy.recommendation(signals: signals, now: now, targetFPS: max(currentCap, 30),
                     current: profile.nextLaunchScale ?? profile.renderScale, minimum: profile.minimumScale, maximum: profile.maximumScale) {
                 profile.nextLaunchScale = scale

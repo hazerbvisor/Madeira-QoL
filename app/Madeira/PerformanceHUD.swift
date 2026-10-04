@@ -57,7 +57,8 @@ struct LibraryMetrics: View {
         }
         if fields.contains("Pressure") { lines.append("Memory: \(value.pressure.rawValue) · Thermal: \(value.thermal)") }
         if fields.contains("FPS cap") {
-            lines.append(value.activeCap < 0 ? "FPS cap: existing renderer mode" : value.activeCap == 0 ? "FPS cap: unlimited" : "FPS cap: \(value.activeCap)")
+            if madeira_performance_renderer_available() == 0 { lines.append("Precise FPS cap: unavailable for this renderer") }
+            else { lines.append(value.activeCap < 0 ? "FPS cap: existing renderer mode" : value.activeCap == 0 ? "FPS cap: unlimited" : "FPS cap: \(value.activeCap)") }
             if let decision = value.decision { lines.append(decision) }
         }
         if fields.contains("Battery"), battery >= 0 { lines.append("Battery \(battery)%") }

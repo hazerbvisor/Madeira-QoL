@@ -12,6 +12,13 @@ text = source.read_text()
 
 if source.name == 'dxmt_presenter.cpp':
     text = '#include "PerformanceBridge.h"\n' + text
+    anchor = 'layer_.setProps(layer_props_);'
+    assert text.count(anchor) == 3
+    text = text.replace(anchor, '''[&] {
+      madeira_spatial_native_props(1);
+      layer_.setProps(layer_props_);
+      madeira_spatial_native_props(0);
+    }();''')
     before = '  WMTRenderPassInfo info;\n'
     assert text.count(before) == 1
     text = text.replace(before, '''  // Preserve HDR, gamma and multisample semantics through the original blit.
@@ -49,8 +56,13 @@ once('  madeira_log_present_cadence("presentDrawableAfterMinDuration", params->a
   }
   madeira_log_present_cadence("presentDrawableAfterMinDuration", params->arg1);''')
 once('    layer.drawableSize = CGSizeMake(props->drawable_width, props->drawable_height);', '''    double width = props->drawable_width, height = props->drawable_height;
-    madeira_spatial_adjust_size(&width, &height);
+    madeira_spatial_adjust_size(madeira_native_props, &width, &height);
     layer.drawableSize = CGSizeMake(width, height);''')
+once('  const struct WMTLayerProps *props = params->arg.ptr;\n  execute_on_main(^{', '''  const struct WMTLayerProps *props = params->arg.ptr;
+  // Sample the calling renderer's marker before hopping to UIKit's main queue.
+  // Native and guest Presenters can share a layer but use different viewport code.
+  int madeira_native_props = madeira_spatial_native_props_active();
+  execute_on_main(^{''')
 
 for name in ['_MTLDevice_newComputePipelineState', '_MTLDevice_newRenderPipelineState', '_MTLDevice_newRenderPipelineStateVD']:
     start = text.index('static NTSTATUS\n' + name + '(')
