@@ -140,6 +140,8 @@
 		B90000000000000000000206 /* AdaptivePerformancePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000106 /* AdaptivePerformancePolicy.swift */; };
 		B90000000000000000000207 /* PerformanceRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000107 /* PerformanceRuntime.swift */; };
 		B90000000000000000000208 /* PerformanceHUD.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000108 /* PerformanceHUD.swift */; };
+		B90000000000000000000209 /* FrameReconstructionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000109 /* FrameReconstructionPolicy.swift */; };
+		B9000000000000000000020A /* ReconstructionRendererHooks.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9000000000000000000010A /* ReconstructionRendererHooks.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -327,6 +329,8 @@
 		B90000000000000000000106 /* AdaptivePerformancePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptivePerformancePolicy.swift; sourceTree = "<group>"; };
 		B90000000000000000000107 /* PerformanceRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceRuntime.swift; sourceTree = "<group>"; };
 		B90000000000000000000108 /* PerformanceHUD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceHUD.swift; sourceTree = "<group>"; };
+		B90000000000000000000109 /* FrameReconstructionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameReconstructionPolicy.swift; sourceTree = "<group>"; };
+		B9000000000000000000010A /* ReconstructionRendererHooks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReconstructionRendererHooks.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -462,6 +466,8 @@
 				B90000000000000000000106 /* AdaptivePerformancePolicy.swift */,
 				B90000000000000000000107 /* PerformanceRuntime.swift */,
 				B90000000000000000000108 /* PerformanceHUD.swift */,
+				B90000000000000000000109 /* FrameReconstructionPolicy.swift */,
+				B9000000000000000000010A /* ReconstructionRendererHooks.swift */,
 				B90000000000000000000105 /* PerformanceSettingsView.swift */,
 				B90000000000000000000104 /* RendererCaches.swift */,
 				B90000000000000000000103 /* PerformancePolicy.swift */,
@@ -774,6 +780,8 @@
 				B90000000000000000000206 /* AdaptivePerformancePolicy.swift in Sources */,
 				B90000000000000000000207 /* PerformanceRuntime.swift in Sources */,
 				B90000000000000000000208 /* PerformanceHUD.swift in Sources */,
+				B90000000000000000000209 /* FrameReconstructionPolicy.swift in Sources */,
+				B9000000000000000000020A /* ReconstructionRendererHooks.swift in Sources */,
 				B90000000000000000000205 /* PerformanceSettingsView.swift in Sources */,
 				B90000000000000000000204 /* RendererCaches.swift in Sources */,
 				B90000000000000000000203 /* PerformancePolicy.swift in Sources */,

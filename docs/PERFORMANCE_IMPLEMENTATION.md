@@ -47,8 +47,8 @@ require a separate wineserver lifetime redesign and is outside this work.
 
 ## Validation and completion checklist
 
-Implementation is in progress. Final phase-by-phase status, exact blockers,
-host/build results and device-only checks will be recorded here before the PR.
+The phase reports and final checklist below distinguish implemented source,
+technical blockers and checks that require an actual device/game.
 ETS2 and an iOS device are not present in the Linux build environment. The
 reported 20–30 FPS at 1280×960 is the user's baseline, not a measured result here.
 
@@ -92,7 +92,8 @@ virtual-desktop capture are not independently bridged into UIKit pointer lock.
 Apple also restricts pointer lock to compatible fullscreen iPad scenes/raw
 mouse streams. These constraints must not be presented as universal capture.
 
-Phases 3–5 remain in progress. They are not part of the Phase 2 completion claim.
+The Phase 2 checkpoint did not include the later phases; subsequent work is
+reported below.
 
 Phase 2 release validation (2026-10-04): the app and JIT helper compiled and
 linked successfully with xtool 1.20.1, Swift 6.3.3 and the iPhoneOS 26.5 SDK on
@@ -106,7 +107,7 @@ IPA still needs signing/installing and on-device runtime checks listed above.
 
 ## Phase 3 — spatial upscaling
 
-MadeiraFX Off/Quality/Balanced/Performance/Auto requests a lower session monitor
+For native 32-bit D3D9, MadeiraFX Off/Quality/Balanced/Performance/Auto requests a lower session monitor
 and explicitly distinguishes requested internal resolution from output. The
 shared native DXMT Presenter encodes public MetalFX Spatial on the same game
 command buffer with the existing fence. Scalers are reused by dimension/format,
@@ -167,3 +168,101 @@ cover sampling pause/disable, hidden pressure/cap handling, adaptive cooldowns,
 invalid/missing inputs, bounded advice, recovery gates, Auto profile persistence,
 and valid/corrupt SQLite cache fallback. Real pressure notifications, GPU timing,
 thermal behavior and visual HUD overhead require device validation.
+
+## Phase 5 — reconstruction extension contract
+
+The registered-provider boundary accepts coherent native frame pairs, stream
+identity, color/motion/depth textures, jitter, exposure and history reset state.
+It rejects incompatible dimensions/devices, MSAA output, out-of-range target
+times, missing inputs, native rates under 30 FPS, unstable pacing, insufficient
+measured GPU headroom and memory/thermal/power pressure. Successful generated
+encodes have a separate counter; encoding is never counted as visible or native
+presentation. No production backend is registered, so generation and temporal
+reconstruction remain disabled. Host tests use fake textures/providers to test
+admission and accounting only; they do not synthesize any image.
+
+Phase 5 app/helper release build passed (129.90 seconds). A final native-route
+compatibility audit found that guest Presenters do not call the native spatial
+bridge; the correction and final rebuild are included in this branch.
+
+## Completion report and checklist
+
+### Fully implemented in source and host-validated
+
+- Backward-compatible per-executable profiles, precise 30/40/60/90/120/unlimited
+  producer deadlines, cap transitions and stall recovery without busy waiting.
+- Cache namespaces/invalidation and clear UI; corruption fallback for SQLite;
+  bounded optional pipeline population and pressure cleanup.
+- Shared fullscreen/scaling/input geometry, integer pixel alignment and input
+  cancellation; existing keyboard, mouse, controller and touch paths retained.
+- Runtime signal collection, estimated bottleneck categories, conservative Auto
+  FPS policy, hysteresis/cooldown scale advice, profile decision persistence and
+  independently disableable HUD/timing callbacks.
+- Typed reconstruction provider/input hooks and admission checks. No production
+  frame-generation backend is registered or advertised as available.
+
+### Partially implemented / runtime-dependent
+
+- MetalFX Spatial works at the source integration boundary for **native 32-bit
+  D3D9** only, with `d3d9 = native`, supported device/texture usage and a game
+  honoring the requested monitor. Guest D3D11, 64-bit D3D9 and emulated i386 D3D9
+  are excluded. Native property updates are tagged per calling thread before
+  hopping to UIKit; guest calls keep their original drawable dimensions even
+  when layers are shared. Remote Metal's tagged handles are never messaged as
+  local Metal objects. Actual image quality/activation remains device-unverified.
+- Renderer persistence uses DXMT's SQLite cache plus public normal render/compute
+  Metal archives. Mesh pipelines are not archived by the new hook. Real warm
+  launch reuse and pipeline compatibility still need device verification.
+- CPU/FEX classification uses aggregate process CPU with GPU/interval signals;
+  it does not measure FEX translation time. Pipeline timings include preparation
+  and driver work, not a proven shader-compilation count. Native FPS is submission
+  rate, explicitly estimated; visible FPS is unavailable without valid iOS
+  presentedTime. The diagnostic remote renderer does not support these local
+  timing/upscaling hooks.
+- Auto scale changes are saved **next-launch recommendations**, not live DRS.
+  Auto's target is bounded by the device's supported display caps. No unattended
+  compatibility override, extra frame queue or speculative FPS boost is used.
+
+### Blocked
+
+- **FEX:** current iOS persistent-code load/finalization lacks safe bounded parsing,
+  executable allocation/relocation and bridge page registration. Its contribution
+  instructions also prohibit AI code changes. Persistent FEX cache stays off.
+- **Guest DXMT Presenters:** D3D11/64-bit/emulated D3D9 spatial integration needs a
+  validated guest DLL/Unix-call bridge change, or a redesigned presentation
+  texture contract. Host drawable resizing alone would break the guest viewport.
+  Those paths retain original resolution/presentation instead.
+- **Live DRS:** game-owned render targets cannot be safely recreated from the
+  generic present boundary. Game/renderer cooperation is required.
+- **Temporal and interpolation:** motion vectors, depth, camera jitter, exposure,
+  coherent previous-frame history and a validated synthesis backend are absent
+  from the current common present interface. Off/2x/Auto admission exists as
+  architecture/profile data; only Off is effective. The provider contract also
+  requires a separate latency/presentation schedule and separate generated-frame
+  accounting. No generated image or synthetic FPS gain is shipped.
+
+### Validation checklist
+
+| Requirement | Evidence / remaining limit |
+| --- | --- |
+| Build and introduced compiler errors | App/helper full release builds and affected native objects pass; final result recorded below |
+| App launch and game launch | Unverified: no connected iOS device or installed Windows game |
+| Configuration persistence | Production profile JSON round trips, legacy defaults, Auto decisions and controller/touch layout tests pass |
+| Fullscreen enter/exit, safe areas/orientation | Geometry/coordinate tests and cancellation pass; appearance and actual UIKit lifecycle require device |
+| Mouse capture/release and keyboard | Focus/edge/PC key maps and interruption tests pass; physical iPad pointer lock and shortcuts require device |
+| Controller fallback | Four slots, disconnect/reconnect, signed ranges, packet ABI, concurrent snapshots and neutral UI behavior covered by host tests |
+| MetalFX capability fallback | Native/guest/remote/profile admission and per-thread sizing tests pass; actual GPU unsupported-device/allocation fallback requires device |
+| Cache invalidation | Valid SQLite preserved; corrupt DB/journals/locks evicted; unrelated files retained; Metal archive corruption/warm reuse require device |
+| HUD completely disabled | Production coordinator test verifies no timer/callback sampling with HUD and Auto off, including menu/launch/background pause |
+| Memory and thermal | Adaptive policy and coordinator pressure tests pass; actual iOS notifications, resident GPU use and long-session behavior require device |
+| One profile end-to-end | Host profile persistence, launch environment, virtual monitor and geometry tested; an actual game launch remains unverified |
+| ETS2 benchmark | Unavailable: no game/device workload in this environment |
+
+### Benchmark changes
+
+The user's baseline is approximately 20–30 FPS at 1280×960. No after-run FPS,
+frame-time, memory, thermal or shader-stutter measurement is available here.
+Synthetic deadline/policy tests demonstrate correctness, not gaming performance.
+No improvement number is claimed. Test ETS2 on an iPad with the same game scene
+and settings, compare cold/warm launch, keep native submissions and visible FPS
+separate, and record at least a sustained session for thermal/memory behavior.
