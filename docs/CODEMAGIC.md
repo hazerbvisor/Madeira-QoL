@@ -1,4 +1,4 @@
-# Codemagic clean native build
+# Codemagic native build
 
 Workflow ID: `madeira-unsigned-ios` (display name: **Madeira Debug unsigned IPA**).
 It builds the generic arm64 iOS device target in Debug with signing disabled,
@@ -46,6 +46,35 @@ for this iOS path. Obtain private inputs under their respective supplier terms.
 Signing credentials, an Apple ID and pairing/JIT credentials are unnecessary to
 produce this unsigned IPA. They are needed later when installing/running it.
 
+## Precompiled FEX libraries
+
+The default `MADEIRA_USE_PREBUILT_FEX=1` verifies and uses the **seven FEX libraries
+already cross-compiled for this branch**, plus their five generated headers. It
+skips FEX compilation. The remaining native dependencies still build from source;
+no completed Wine, DXMT or LLVM iOS archive was produced locally.
+
+`build/fex-ios/prebuilt-pins.json` pins the tracked archive path, archive SHA-256, each file's
+SHA-256, FEX revision, recursive dependency revisions and compatibility recipe
+hashes. `build/codemagic/fex-prebuilt.py` checks the source revisions and recipe,
+validates every bundled file and all 154 ARM64 iOS Mach-O archive objects,
+then stages the libraries at the existing Xcode paths. Mismatches fail explicitly.
+The bundle includes license notices and provenance. Corresponding source is
+available in the pinned recursive submodules and parent build recipe, with
+rebuild instructions in `build/fex-ios/prebuilt/README.md`. The bundle has no
+Apple SDK or Microsoft runtime binaries.
+
+These archives target `arm64-apple-ios17.0`. They were compiled using Clang 21 and
+iPhoneOS 26.5 headers. The already compiled LLVM IR was materialized into normal
+Mach-O objects with the same compiler backend, so Xcode need not decode LLVM
+bitcode from another compiler version. The final Xcode link and device execution
+remain unverified.
+
+Set `MADEIRA_USE_PREBUILT_FEX=0` to build FEX from source instead, including when
+changing its revision or compatibility recipe. `MADEIRA_CLEAN_NATIVE=1` removes
+staged FEX outputs and restores the verified bundle on the next default build.
+The 948 KB compressed bundle is tracked in `build/fex-ios/prebuilt/`, so it is
+available in every checkout. Its checksum is checked on every invocation.
+
 ## Source bootstrap and caches
 
 The recursive submodules select the exact commits recorded in Git. LLVM is fetched
@@ -59,7 +88,8 @@ manifest is consumed by DXMT, which creates and indexes a new combined archive
 with Apple's `libtool`; objects with identical basenames in different LLVM
 archives are preserved. Shader AIR headers are generated from DXMT sources.
 
-The iOS CMake builds explicitly set `CMAKE_SYSTEM_PROCESSOR=aarch64` as well as
+When compiling from source, the iOS CMake builds explicitly set
+`CMAKE_SYSTEM_PROCESSOR=aarch64` as well as
 `CMAKE_OSX_ARCHITECTURES=arm64`. FEX sets `TUNE_CPU=none` and `TUNE_ARCH=generic`, so its Linux-only
 `/proc/cpuinfo` and SVE probes are skipped. It always reconfigures, including after
 a failed configuration, and uses its pinned bundled dependencies rather than host
@@ -76,15 +106,17 @@ crypto archives are staged to the exact app link paths.
 
 Codemagic caches the LLVM source and host/iOS build directories, llvm-mingw
 release download, Cargo downloads and ccache. An SDK/Xcode/source recipe change
-invalidates LLVM products. No cache is needed for correctness: the scripts fetch,
-configure and build when the directories are empty. llvm-mingw's documented
+invalidates LLVM products. No cache is needed for correctness: the scripts stage
+the tracked FEX bundle and configure and build the remaining dependencies when
+the directories are empty. llvm-mingw's documented
 20260421 tarball is SHA-256 checked on **every** invocation before extraction.
 FreeType is fetched at `42608f77f20749dd6ddc9e0536788eaad70ea4b5` (2.13.3).
 The tracked GnuTLS/GMP/Nettle and FFmpeg tarballs are checksum verified.
 
 The native build order prepares Wine's host config and the required WIDL header
 closure, rebuilds
-GnuTLS/GMP/Nettle, FFmpeg, FEX iOS (including JemallocLibs), FreeType, ntdll unix,
+GnuTLS/GMP/Nettle and FFmpeg, stages precompiled FEX iOS (including JemallocLibs)
+by default, then builds FreeType, ntdll unix,
 wineserver, win32u unix, LLVM/DXMT, and the locked Rust pairing library. Dock's
 ignored PE resource is also built with llvm-mingw. Existing tracked guest Wine,
 FEX and D3D12 PE binaries remain bundled; unused optional WoW64 components are
@@ -97,7 +129,7 @@ in Madeira.xcodeproj:
 
 | Libraries | Classification | Build source |
 | --- | --- | --- |
-| FEXCore, FEXCore_Base, JemallocLibs, fmt, cephes_128bit, xxhash, softfloat_3e | built from source | pinned FEX submodules |
+| FEXCore, FEXCore_Base, JemallocLibs, fmt, cephes_128bit, xxhash, softfloat_3e | prebuilt by default; source build optional | checksum-pinned tracked bundle; `MADEIRA_USE_PREBUILT_FEX=0` builds pinned sources |
 | ntdll_unix, wineserver | built from source | pinned Wine with existing Madeira source replacements |
 | win32u_unix | generated/composed | pinned Wine plus FreeType 2.13.3 |
 | dxmt_combined | generated/composed | pinned DXMT plus pinned LLVM dependency closure |
@@ -119,6 +151,7 @@ On macOS, with Xcode and the workflow build tools installed:
 ```sh
 git submodule update --init --recursive
 bash build/codemagic/clean-native.sh
+# Set MADEIRA_USE_PREBUILT_FEX=0 here for an entirely source-built native tree.
 bash build/codemagic/build-native.sh
 python3 build/codemagic/verify-link-inputs.py
 ```
@@ -145,8 +178,10 @@ were generated by compiling and running the pinned host WIDL. The iOS compilatio
 of Wine/DXMT/LLVM and the final Xcode link/IPA packaging have **not** completed.
 A Linux cross-build with Clang 21, iPhoneOS 26.5 headers and target
 `arm64-apple-ios17.0` compiled all seven required FEX static libraries, including
-the native diagnostic compatibility headers. Their archive membership and target
-metadata were checked. This validates FEX compilation, not the macOS workflow or
+the native diagnostic compatibility headers. All 154 objects were materialized
+as ordinary ARM64 iOS Mach-O and packaged with the generated headers. The
+importer and archive checks were executed locally. This validates FEX compilation,
+not the macOS workflow or
 final app link.
 The next Codemagic run compiled 36 of 37 ntdll translation units, stopping at a
 non-public `rusage_info_v6` page-wait field in `server_ios.c`. That diagnostic now

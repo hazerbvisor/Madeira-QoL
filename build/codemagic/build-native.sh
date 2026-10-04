@@ -10,7 +10,11 @@ bash build/codemagic/toolchains.sh
 bash build/codemagic/wine-headers.sh
 bash build/gnutls-ios/build.sh
 bash build/ffmpeg/build.sh
-bash build/fex-ios/build.sh
+case "${MADEIRA_USE_PREBUILT_FEX:-1}" in
+    1) python3 build/codemagic/fex-prebuilt.py ;;
+    0) bash build/fex-ios/build.sh ;;
+    *) echo 'MADEIRA_USE_PREBUILT_FEX must be 0 or 1' >&2; exit 1 ;;
+esac
 # FreeType is actually merged into win32u, rather than linked separately.
 SRC="$R/research/freetype"
 REV=42608f77f20749dd6ddc9e0536788eaad70ea4b5

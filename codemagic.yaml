@@ -8,6 +8,7 @@ workflows:
       vars:
         BUILD_JOBS: "8"
         MADEIRA_CLEAN_NATIVE: "0"
+        MADEIRA_USE_PREBUILT_FEX: "1"
         # Microsoft runtime DLLs bootstrap automatically. Private overrides
         # remain available; see docs/CODEMAGIC.md.
     cache:
@@ -36,7 +37,7 @@ workflows:
           rustup target add aarch64-apple-ios
           xcodebuild -downloadComponent MetalToolchain
           printf 'PATH=%s\n' "$PATH" >> "$CM_ENV"
-      - name: Build native dependencies from source
+      - name: Stage precompiled FEX and build remaining native dependencies
         script: |
           set -euo pipefail
           if [ "$MADEIRA_CLEAN_NATIVE" = "1" ]; then

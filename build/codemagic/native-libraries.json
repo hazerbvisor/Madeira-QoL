@@ -1,31 +1,31 @@
 {
   "FEX/build-ios/FEXCore/Source/libFEXCore.a": {
-    "classification": "built from source",
-    "builder": "build/fex-ios/build.sh"
+    "classification": "prebuilt by default; source build optional",
+    "builder": "build/codemagic/fex-prebuilt.py; build/fex-ios/build.sh (MADEIRA_USE_PREBUILT_FEX=0)"
   },
   "FEX/build-ios/FEXCore/Source/libFEXCore_Base.a": {
-    "classification": "built from source",
-    "builder": "build/fex-ios/build.sh"
+    "classification": "prebuilt by default; source build optional",
+    "builder": "build/codemagic/fex-prebuilt.py; build/fex-ios/build.sh (MADEIRA_USE_PREBUILT_FEX=0)"
   },
   "FEX/build-ios/External/fmt/libfmt.a": {
-    "classification": "built from source",
-    "builder": "build/fex-ios/build.sh"
+    "classification": "prebuilt by default; source build optional",
+    "builder": "build/codemagic/fex-prebuilt.py; build/fex-ios/build.sh (MADEIRA_USE_PREBUILT_FEX=0)"
   },
   "FEX/build-ios/External/cephes/libcephes_128bit.a": {
-    "classification": "built from source",
-    "builder": "build/fex-ios/build.sh"
+    "classification": "prebuilt by default; source build optional",
+    "builder": "build/codemagic/fex-prebuilt.py; build/fex-ios/build.sh (MADEIRA_USE_PREBUILT_FEX=0)"
   },
   "FEX/build-ios/External/xxhash/cmake_unofficial/libxxhash.a": {
-    "classification": "built from source",
-    "builder": "build/fex-ios/build.sh"
+    "classification": "prebuilt by default; source build optional",
+    "builder": "build/codemagic/fex-prebuilt.py; build/fex-ios/build.sh (MADEIRA_USE_PREBUILT_FEX=0)"
   },
   "FEX/build-ios/External/SoftFloat-3e/libsoftfloat_3e.a": {
-    "classification": "built from source",
-    "builder": "build/fex-ios/build.sh"
+    "classification": "prebuilt by default; source build optional",
+    "builder": "build/codemagic/fex-prebuilt.py; build/fex-ios/build.sh (MADEIRA_USE_PREBUILT_FEX=0)"
   },
   "FEX/build-ios/FEXCore/Source/libJemallocLibs.a": {
-    "classification": "built from source",
-    "builder": "build/fex-ios/build.sh"
+    "classification": "prebuilt by default; source build optional",
+    "builder": "build/codemagic/fex-prebuilt.py; build/fex-ios/build.sh (MADEIRA_USE_PREBUILT_FEX=0)"
   },
   "app/Madeira/libwineserver.a": {
     "classification": "built from source",
