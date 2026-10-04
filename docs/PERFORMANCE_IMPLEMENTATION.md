@@ -166,8 +166,8 @@ are provided at the common presentation boundary.
 ## Phase 4 — runtime manager and diagnostics
 
 A session-scoped manager samples once per second only while gameplay is active
-and the HUD or explicit Auto mode is enabled. The HUD has its own observable
-object. Opening UI, backgrounding, launching and disabling both features stop
+and the HUD, explicit Auto mode or interpolation is enabled. The HUD has its own observable
+object. Opening UI, backgrounding, launching and disabling all three features stop
 the timer and renderer timing callbacks. OS pressure/thermal notifications stay
 active for safety; hidden operation has no polling/log stream.
 
@@ -178,7 +178,7 @@ Pipeline creation is not reported as a count of shader compilations. Native
 submission rate is explicitly estimated; it includes renderer submissions, not
 proof of visible frames. Visible FPS requires valid drawable presentedTime;
 zero timestamps remain unavailable. Generated encode accounting is separate and
-zero without a real provider. CPU/FEX and GPU bottleneck classifications are
+separate from scheduled and timestamp-confirmed generated presentation. CPU/FEX and GPU bottleneck classifications are
 estimates; no direct FEX translation-pressure signal exists here.
 
 Auto targets the chosen positive cap or conservative 30 FPS by default. Memory,
@@ -203,24 +203,66 @@ invalid/missing inputs, bounded advice, recovery gates, Auto profile persistence
 and valid/corrupt SQLite cache fallback. Real pressure notifications, GPU timing,
 thermal behavior and visual HUD overhead require device validation.
 
-## Phase 5 — reconstruction extension contract
+## Phase 5 — experimental optical-flow interpolation
 
-The registered-provider boundary accepts coherent native frame pairs, stream
-identity, color/motion/depth textures, jitter, exposure and history reset state.
-It rejects incompatible dimensions/devices, MSAA output, out-of-range target
-times, missing inputs, native rates under 30 FPS, unstable pacing, insufficient
-measured GPU headroom and memory/thermal/power pressure. Successful generated
-encodes have a separate counter; encoding is never counted as visible or native
-presentation. No production backend is registered, so generation and temporal
-reconstruction remain disabled. Host tests use fake textures/providers to test
-admission and accounting only; they do not synthesize any image.
+Off remains the default for old and new profiles. MadeiraFX now exposes **2×
+(experimental)** and **Auto (experimental)** for local DXMT D3D9/D3D11. This is a
+color-only optical-flow backend, separate from MetalFX Spatial and Apple’s
+motion/depth-based frame interpolator. MetalFX temporal remains unavailable.
 
-Phase 5 app/helper release build passed (129.90 seconds). The later guest Spatial
-revision exposes a completed presentation color image, but still does not supply
-trustworthy scene depth, game motion vectors, camera jitter or exposure. The
-actual iPhoneOS 26.5 `MTLFXFrameInterpolator.h` was checked: its input contract
-requires motion/depth data and coherent prior color history. Availability of the
-SDK API alone does not make the current generic renderer supply those inputs.
+`FrameInterpolation.m` keeps a private previous-color texture per layer and uses
+`OpticalFlow.metal` to match image patches in both directions on a 16-pixel grid.
+A coarse search plus pixel refinement estimates motion; the midpoint warps the
+previous and current colors by half the estimated displacement. Inconsistent or
+uncertain pixels retain current color. Whole-frame confidence rejects scene
+changes or widespread uncertainty before a synthetic drawable is presented.
+This produces a motion-compensated image, rather than counting a repeated native
+frame as generation. It can still produce disocclusion, HUD and fast-motion
+artifacts, especially beyond the bounded search range.
+
+The shaders execute after the renderer’s original gamma/format conversion and
+optional Spatial pass, on its existing command buffer. The authoritative Metal
+source is embedded as an exactly matching C string and compiled through public
+Metal APIs on the renderer worker; compilation failure preserves native output.
+History and generated textures plus flow buffers have a **32 MiB global budget**,
+separate from Spatial’s budget. Only SDR BGRA8/RGBA8 Unorm, single-sample output
+between 320×240 and 1920×1440 is admitted. No game resources are resized and no
+scene depth or game motion vectors are guessed.
+
+Admission requires a fixed native 30 or 60 FPS cap, a panel supporting at least
+60 or 120 Hz respectively, three stable one-second samples and measured GPU
+headroom. Auto uses stricter headroom and confidence thresholds. Missing timing,
+unstable pacing, memory pressure, serious thermal state and Low Power Mode
+withdraw admission. Menu, launch and background transitions reset history and
+pause synthesis; recovery requires stable samples again. Safety sampling runs
+when interpolation is requested even with the HUD hidden. With HUD, Auto and
+interpolation all off, no sampling timer runs.
+
+The first frame warms history and retains native presentation. An eligible pair
+reserves one additional drawable on the renderer thread. After generation
+completes, a presentation-only command buffer on the **same command queue**
+blits the generated image and schedules midpoint and native drawables half a
+native period apart. This deliberately delays native display by roughly half
+a frame (16.7 ms at 30 FPS, 8.3 ms at 60 FPS), plus scheduling overhead. Late,
+busy, low-confidence or failed work presents native alone; no catch-up burst
+is queued. Acquisition can still wait on the iOS drawable pool; slow acquisition
+rejects generation afterward. Actual driver scheduling and latency need device
+verification. One layer may have only one interpolation operation in flight.
+
+Native submissions, native confirmed presentations, generated encodes,
+generated scheduled presentations and generated confirmed presentations remain
+separate. Only a positive drawable `presentedTime` counts as visible; scheduling
+or encoding alone never produces a displayed-FPS claim. The HUD reports active,
+warmup and named fallback states, plus estimated added display delay.
+
+The existing typed engine reconstruction provider contract remains available
+for future motion/depth-aware backends. Its admission and fake-provider tests
+cover that contract, not the optical-flow algorithm. The new optical-flow suite
+executes the **exact shader core** on CPU texture adapters: translated and static
+images, expected warped midpoint, border handling, inconsistent motion,
+scene-change confidence, 30/60 FPS deadlines, late-work rejection and Swift
+admission/cooldown gates. This validates math and policy; it does **not** execute
+Metal’s shader compiler, GPU dispatch, drawable pool or physical display.
 
 ## Completion report and checklist
 
@@ -235,8 +277,10 @@ SDK API alone does not make the current generic renderer supply those inputs.
 - Runtime signal collection, estimated bottleneck categories, conservative Auto
   FPS policy, hysteresis/cooldown scale advice, profile decision persistence and
   independently disableable HUD/timing callbacks.
-- Typed reconstruction provider/input hooks and admission checks. No production
-  frame-generation backend is registered or advertised as available.
+- Typed engine reconstruction provider/input hooks and admission checks.
+- Experimental color-based optical-flow matching, midpoint synthesis, history,
+  bounded resource reuse, presentation scheduling and separate frame accounting.
+  GPU driver and actual displayed output remain device-unverified.
 
 ### Partially implemented / runtime-dependent
 
@@ -255,7 +299,8 @@ SDK API alone does not make the current generic renderer supply those inputs.
   timing/upscaling hooks.
 - Auto scale changes are saved **next-launch recommendations**, not live DRS.
   Auto's target is bounded by the device's supported display caps. No unattended
-  compatibility override, extra frame queue or speculative FPS boost is used.
+  compatibility override or speculative FPS boost is used. Interpolation’s
+  opt-in display delay and extra presentation buffer are described above.
 
 ### Blocked
 
@@ -267,12 +312,13 @@ SDK API alone does not make the current generic renderer supply those inputs.
   removed by the new texture contract, rather than by resizing guest drawables.
 - **Live DRS:** game-owned render targets cannot be safely recreated from the
   generic present boundary. Game/renderer cooperation is required.
-- **Temporal and interpolation:** motion vectors, depth, camera jitter, exposure,
-  coherent previous-frame history and a validated synthesis backend are absent
-  from the current common present interface. Off/2x/Auto admission exists as
-  architecture/profile data; only Off is effective. The provider contract also
-  requires a separate latency/presentation schedule and separate generated-frame
-  accounting. No generated image or synthetic FPS gain is shipped.
+- **MetalFX temporal / Apple frame interpolator:** trustworthy game motion
+  vectors, scene depth, camera jitter and exposure remain absent from the generic
+  present interface. The separate color-based optical-flow implementation does
+  not remove that engine-data requirement.
+- **Device validation:** no connected iOS GPU, iPad or ETS2 workload. Shader driver
+  compilation, image quality, actual generated presentation, long-session memory,
+  thermals and input/display latency must be measured on hardware.
 
 Changing the virtual monitor's environment while running is insufficient for
 live DRS: Wine's session monitor and game-owned targets have independent state.
@@ -292,7 +338,8 @@ depth/motion binding is shipped as a substitute for that cooperation.
 | Controller fallback | Four slots, disconnect/reconnect, signed ranges, packet ABI, concurrent snapshots and neutral UI behavior covered by host tests |
 | MetalFX capability fallback | Native/guest/remote/profile admission, texture sizing, atomic global budget and lease release tests pass; actual GPU image/allocation/usage fallback requires device |
 | Cache invalidation | Valid SQLite preserved; corrupt DB/journals/locks evicted; unrelated files retained; Metal archive corruption/warm reuse require device |
-| HUD completely disabled | Production coordinator test verifies no timer/callback sampling with HUD and Auto off, including menu/launch/background pause |
+| HUD completely disabled | Production coordinator test verifies no timer/callback sampling with HUD, Auto and interpolation off, including menu/launch/background pause |
+| Frame interpolation | Exact shader core, confidence, timing and admission tests pass; Metal execution, generated images and displayed cadence require device |
 | Memory and thermal | Adaptive policy and coordinator pressure tests pass; actual iOS notifications, resident GPU use and long-session behavior require device |
 | One profile end-to-end | Host profile persistence, launch environment, virtual monitor and geometry tested; an actual game launch remains unverified |
 | ETS2 benchmark | Unavailable: no game/device workload in this environment |
@@ -354,3 +401,28 @@ not evidence of active MetalFX. Compare the same scene with Spatial Off for
 image quality, stable frame time and sustained memory/thermal behavior. Also
 exercise menu/background transitions and allocation/format/pressure fallback.
 This procedure has not been run here because no iOS GPU or game is connected.
+
+### Testing experimental interpolation
+
+In a local DXMT D3D9/D3D11 game’s MadeiraFX settings choose **2× (experimental)**
+and **Precise FPS cap: 30 FPS**, set SDR output to 1280×960 or lower, then relaunch.
+Spatial may be enabled independently. Enable the FPS and Graphics HUD fields.
+Wait for stable native pacing and inspect the interpolation state. A 20–25 FPS
+native workload will remain rejected; interpolation cannot repair those stalls.
+Auto uses stricter admission and may stay inactive for scenes accepted by 2×.
+For native 60 FPS interpolation the panel must support 120 Hz.
+
+Compare the same scene with interpolation Off. Check moving objects, camera pans,
+HUD edges, scene changes and input latency. Exercise menus/backgrounding, native
+cap changes, Low Power Mode, thermal/memory pressure and unsupported output.
+Generated encodes or scheduled presentations alone do not prove displayed frames;
+use confirmed timestamps where available and an external display recording.
+No iPad verification or ETS2 performance improvement is claimed by this build.
+
+The interpolation app/helper release build passed in **135.43 seconds** with
+xtool 1.20.1, Swift 6.3.3 and the iPhoneOS 26.5 SDK. The affected native renderer
+archive was rebuilt first. All **14 host suites** pass, including the new exact
+optical-flow core and scheduling/admission tests. Apple SDK syntax checks found
+no new warnings in interpolation or performance bridge source. Existing baseline
+Swift/linker warnings remain. The unsigned IPA is rebuilt from this revision;
+packaging checks its resource hashes, executable architecture and dependencies.

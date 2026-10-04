@@ -32,8 +32,11 @@ struct LibraryMetrics: View {
         var lines: [String] = []
         if fields.contains("FPS") {
             lines.append(value.nativeFPS.map { String(format: "Native submissions: %.0f/s (estimate)", $0) } ?? "Native submissions: unavailable")
-            let generated = value.generatedEncodedFPS > 0 ? String(format: "Generated encodes: %.0f/s (not visible FPS)", value.generatedEncodedFPS) : "Generated: off"
-            lines.append((value.visibleFPS.map { String(format: "Visible: %.0f FPS", $0) } ?? "Visible FPS: unavailable") + " · " + generated)
+            lines.append(value.visibleFPS.map { String(format: "Native visible: %.0f FPS", $0) } ?? "Native visible FPS: unavailable")
+            if (library.activeEntry?.performanceUpgrade?.interpolation ?? .off) != .off {
+                lines.append(String(format: "Generated: %.0f encodes/s · %.0f scheduled/s", value.generatedEncodedFPS, value.generatedScheduledFPS))
+                lines.append(value.generatedVisibleFPS.map { String(format: "Generated visible: %.0f FPS", $0) } ?? "Generated visible FPS: unavailable")
+            }
         }
         if fields.contains("Frame time") {
             lines.append(value.frameMS > 0 ? String(format: "Submit intervals: %.1f avg · %.1f p95 · %.1f max ms", value.frameMS, value.p95MS, value.maxMS) : "Submit intervals: unavailable")
@@ -50,7 +53,13 @@ struct LibraryMetrics: View {
             if value.presentationWidth > 0 && (value.presentationWidth != value.internalWidth || value.presentationHeight != value.internalHeight) {
                 lines.append("Present input: \(value.presentationWidth)×\(value.presentationHeight) · Game backbuffer differs")
             }
-            lines.append("MadeiraFX \(requested.label): \(state) · Interpolation: off")
+            lines.append("MadeiraFX \(requested.label): \(state)")
+            let interpolationReasons = [0: "Off", 1: "Waiting for stable samples", 2: "Warming history", 3: "2× active (experimental)",
+                4: "Paused for pressure/power", 5: "Needs 30/60 native and 60/120 Hz display", 6: "Unstable native pacing",
+                7: "Format/device/storage unsupported", 8: "Motion confidence too low", 9: "Insufficient GPU headroom",
+                10: "Missed presentation window", 11: "Previous frame still in flight"]
+            lines.append("Interpolation: \(interpolationReasons[value.interpolationStatus] ?? "Unavailable")")
+            if value.interpolationStatus == 3 { lines.append(String(format: "Added display delay: ~%.1f ms", value.interpolationLatencyMS)) }
         }
         if fields.contains("CPU/GPU") {
             let cpu = value.cpuPercent.map { String(format: "CPU %.0f%% (100%% = one core)", $0) } ?? "CPU unavailable"

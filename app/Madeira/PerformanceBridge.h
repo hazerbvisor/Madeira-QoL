@@ -1,6 +1,7 @@
 #ifndef MADEIRA_PERFORMANCE_BRIDGE_H
 #define MADEIRA_PERFORMANCE_BRIDGE_H
 #include <stdint.h>
+#include "FrameInterpolation.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -11,6 +12,9 @@ typedef struct {
     int gpu_valid, presented_valid, internal_width, internal_height;
     int output_width, output_height, spatial_active, effective_cap, spatial_status;
     int presentation_width, presentation_height;
+    uint64_t generated_scheduled_frames, generated_presented_frames;
+    int generated_presented_valid, interpolation_status;
+    double interpolation_gpu_ms, interpolation_latency_ms;
 } MadeiraPerformanceSnapshot;
 
 /* cap -1 retains the legacy renderer pacing, 0 is unlimited. */

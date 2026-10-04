@@ -7,7 +7,9 @@ import QuartzCore
 struct PerformanceReadout {
     var nativeFPS: Double?
     var visibleFPS: Double?
-    var generatedEncodedFPS = 0.0
+    var generatedEncodedFPS = 0.0, generatedScheduledFPS = 0.0
+    var generatedVisibleFPS: Double?
+    var interpolationStatus = 0, interpolationLatencyMS = 0.0
     var frameMS: Double = 0, p95MS: Double = 0, maxMS: Double = 0
     var gpuMS: Double?, cpuPercent: Double?, memoryMB: Int?, availableMB: Int?
     var pressure: RuntimePressure = .normal
@@ -25,7 +27,7 @@ struct PerformanceReadout {
 /// Main-queue session coordinator. Measurements stay in a separate observable
 /// object so a one-second HUD tick does not invalidate the whole library.
 /// Pressure/thermal notifications remain active even when telemetry is hidden;
-/// the sample timer and renderer callbacks run only for the HUD or explicit Auto.
+/// the sample timer and renderer callbacks run for HUD, Auto or interpolation safety.
 final class PerformanceRuntime: ObservableObject, @unchecked Sendable {
     static let shared = PerformanceRuntime()
     @Published private(set) var readout = PerformanceReadout()
@@ -39,7 +41,8 @@ final class PerformanceRuntime: ObservableObject, @unchecked Sendable {
     private var warningUntil = 0.0
     private var previousTime = 0.0, previousCPU: Double?
     private var previousNative: UInt64 = 0, previousVisible: UInt64 = 0, previousPipelines: UInt64 = 0
-    private var previousGenerated: UInt64 = 0
+    private var previousGenerated: UInt64 = 0, previousScheduled: UInt64 = 0, previousGeneratedVisible: UInt64 = 0
+    private var interpolationPolicy = OpticalFlowAdmission()
     private var scalePolicy = AdaptiveRenderScalePolicy()
     private var fpsPolicy = AutoFPSPolicy()
     private var currentCap = -1
@@ -52,6 +55,8 @@ final class PerformanceRuntime: ObservableObject, @unchecked Sendable {
         entryID = entry.id; profile = entry.performanceUpgrade ?? PerformanceProfile()
         requestedFPS = PerformanceProfile.fpsCaps.filter { $0 > 0 && $0 <= profile.autoRequestedFPS && $0 <= ProMotionIntent.panelMaxFPS }.max() ?? 30
         currentCap = profile.automaticPerformance ? min(profile.lastAutoFPS ?? requestedFPS, requestedFPS) : profile.initialFPSCap
+        let mode = entry.spatialCompatible ? profile.interpolation : .off
+        madeira_interpolation_configure(mode == .double ? 1 : mode == .auto ? 2 : 0)
         readout = PerformanceReadout(); active = true
         let center = NotificationCenter.default
         for name in [ProcessInfo.thermalStateDidChangeNotification, .NSProcessInfoPowerStateDidChange] {
@@ -88,11 +93,14 @@ final class PerformanceRuntime: ObservableObject, @unchecked Sendable {
         observers.removeAll(); entryID = nil
         pressure = .normal; warningUntil = 0; previousTime = 0; previousCPU = nil
         scalePolicy = AdaptiveRenderScalePolicy(); fpsPolicy = AutoFPSPolicy(); lastCachePressure = -1
+        if interpolationPolicy.enabled { ProMotionIntent.apply(cap: currentCap) }
+        madeira_interpolation_configure(0); interpolationPolicy.reset()
         madeira_performance_set_telemetry(0)
         madeira_performance_cache_pressure(0)
     }
 
     func manualPacingSelected() {
+        pauseInterpolation(reason: 1)
         profile.automaticPerformance = false; currentCap = -1; refresh()
     }
 
@@ -101,18 +109,20 @@ final class PerformanceRuntime: ObservableObject, @unchecked Sendable {
         guard entryID != nil else { return }
         let library = LibraryModel.shared
         if profile.automaticPerformance { madeira_performance_set_cap(Int32(currentCap)) }
-        let shouldSample = active && !library.launching && !library.menu && (library.performance || profile.automaticPerformance)
+        let shouldSample = active && !library.launching && !library.menu && (library.performance || profile.automaticPerformance || profile.interpolation != .off)
         madeira_performance_set_telemetry(shouldSample ? 1 : 0)
         if shouldSample && timer == nil {
             var snapshot = MadeiraPerformanceSnapshot(); madeira_performance_snapshot(&snapshot)
             previousNative = snapshot.native_frames; previousVisible = snapshot.presented_frames
             previousGenerated = snapshot.generated_encoded_frames
+            previousScheduled = snapshot.generated_scheduled_frames; previousGeneratedVisible = snapshot.generated_presented_frames
             previousPipelines = snapshot.pipeline_requests; previousTime = CACurrentMediaTime(); previousCPU = cpuSeconds()
             let value = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.sample() }
             value.tolerance = 0.1; RunLoop.main.add(value, forMode: .common); timer = value
         } else if !shouldSample {
             timer?.invalidate(); timer = nil; scalePolicy.reset()
             fpsPolicy = AutoFPSPolicy() // recovery needs uninterrupted gameplay samples
+            pauseInterpolation(reason: 1)
         }
         conditionsChanged()
     }
@@ -140,6 +150,7 @@ final class PerformanceRuntime: ObservableObject, @unchecked Sendable {
             lastCachePressure = level; madeira_performance_cache_pressure(Int32(level))
             if level > 0 { MainActor.assumeIsolated { AmbientArtwork.clear() } }
         }
+        if level > 0 || ProcessInfo.processInfo.isLowPowerModeEnabled { pauseInterpolation(reason: 4) }
         if profile.automaticPerformance && (level > 0 || ProcessInfo.processInfo.isLowPowerModeEnabled) && currentCap > 30 {
             changeCap(30, reason: "30 FPS for memory, thermal or power pressure")
         }
@@ -171,10 +182,13 @@ final class PerformanceRuntime: ObservableObject, @unchecked Sendable {
         let visible = snapshot.presented_valid != 0 && snapshot.presented_frames >= previousVisible ? Double(snapshot.presented_frames - previousVisible) / dt : nil
         let gpu = snapshot.gpu_valid != 0 ? snapshot.gpu_ms : nil
         let generated = snapshot.generated_encoded_frames >= previousGenerated ? Double(snapshot.generated_encoded_frames - previousGenerated) / dt : 0
+        let scheduled = snapshot.generated_scheduled_frames >= previousScheduled ? Double(snapshot.generated_scheduled_frames - previousScheduled) / dt : 0
+        let generatedVisible = snapshot.generated_presented_valid != 0 && snapshot.generated_presented_frames >= previousGeneratedVisible ? Double(snapshot.generated_presented_frames - previousGeneratedVisible) / dt : nil
         let pipeline = snapshot.pipeline_requests > previousPipelines ? snapshot.pipeline_ms : nil
         previousTime = now; previousCPU = cpu; previousNative = snapshot.native_frames
         previousVisible = snapshot.presented_frames; previousPipelines = snapshot.pipeline_requests
         previousGenerated = snapshot.generated_encoded_frames
+        previousScheduled = snapshot.generated_scheduled_frames; previousGeneratedVisible = snapshot.generated_presented_frames
         let signals = PerformanceSignals(frameMS: snapshot.mean_ms, p95MS: snapshot.p95_ms, gpuMS: gpu,
             cpuPercent: cpuPercent, pipelineMS: pipeline, memory: memoryPressure, thermalSerious: thermalSerious,
             powerConstrained: ProcessInfo.processInfo.isLowPowerModeEnabled)
@@ -193,9 +207,16 @@ final class PerformanceRuntime: ObservableObject, @unchecked Sendable {
                 persistDecision()
             }
         }
+        let wasEnabled = interpolationPolicy.enabled
+        let reason = interpolationPolicy.update(mode: profile.interpolation, cap: currentCap, panelFPS: ProMotionIntent.panelMaxFPS,
+            nativeFPS: native, meanMS: snapshot.mean_ms, p95MS: snapshot.p95_ms, gpuMS: gpu,
+            constrained: memoryPressure != .normal || thermalSerious || ProcessInfo.processInfo.isLowPowerModeEnabled, now: now)
+        madeira_interpolation_gate(interpolationPolicy.enabled ? 1 : 0, Int32(currentCap), Int32(reason))
+        if wasEnabled != interpolationPolicy.enabled { ProMotionIntent.apply(cap: interpolationPolicy.enabled ? currentCap * 2 : currentCap) }
         var value = PerformanceReadout()
         value.nativeFPS = madeira_performance_renderer_available() != 0 ? native : nil; value.visibleFPS = visible
-        value.generatedEncodedFPS = generated
+        value.generatedEncodedFPS = generated; value.generatedScheduledFPS = scheduled; value.generatedVisibleFPS = generatedVisible
+        value.interpolationStatus = Int(snapshot.interpolation_status); value.interpolationLatencyMS = snapshot.interpolation_latency_ms
         value.frameMS = snapshot.mean_ms; value.p95MS = snapshot.p95_ms; value.maxMS = snapshot.max_ms
         value.cpuPercent = cpuPercent; value.gpuMS = gpu; value.memoryMB = footprintMB()
         value.availableMB = Int(madeira_available_memory() / 1_048_576)
@@ -209,7 +230,13 @@ final class PerformanceRuntime: ObservableObject, @unchecked Sendable {
         value.stalls = snapshot.stalls; value.decision = profile.lastAutoDecision
         readout = value
     }
+    private func pauseInterpolation(reason: Int) {
+        let wasEnabled = interpolationPolicy.enabled
+        interpolationPolicy.reset(); madeira_interpolation_gate(0, Int32(currentCap), Int32(reason))
+        if wasEnabled { ProMotionIntent.apply(cap: currentCap) }
+    }
     private func changeCap(_ target: Int, reason: String) {
+        pauseInterpolation(reason: 1)
         currentCap = target; madeira_performance_set_cap(Int32(target)); ProMotionIntent.apply(cap: target)
         profile.lastAutoFPS = target; profile.lastAutoDecision = reason; persistDecision()
     }

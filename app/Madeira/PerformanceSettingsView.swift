@@ -89,7 +89,17 @@ struct MadeiraFXSettings: View {
                 Text("Spatial requires a supported device and a local DXMT Direct3D 9 or 11 game. Desktop, remote Metal and other renderer paths retain original rendering and resolution.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Text("Temporal reconstruction and frame interpolation are unavailable: the presentation path does not provide trustworthy motion vectors, depth and camera jitter.")
+            Picker("Frame interpolation", selection: Binding(get: { profile.interpolation }, set: {
+                profile.interpolation = $0
+                if $0 != .off && profile.fpsCap != 30 && profile.fpsCap != 60 { profile.fpsCap = 30 }
+            })) {
+                Text("Off").tag(FrameInterpolationMode.off)
+                Text("2× (experimental)").tag(FrameInterpolationMode.double)
+                Text("Auto (experimental)").tag(FrameInterpolationMode.auto)
+            }.disabled(!compatible || madeira_interpolation_supported() == 0)
+            Text("Color-based optical flow generates a midpoint between rendered frames. Requires stable native 30/60 FPS, a 60/120 Hz display, GPU headroom and SDR output up to 1920×1440. Adds about half a native frame of display delay and may produce motion artifacts. Auto uses stricter quality and headroom gates. Changes apply at the next launch.")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("MetalFX temporal reconstruction remains unavailable: the game does not supply motion vectors, depth and camera jitter.")
                 .font(.caption).foregroundStyle(.secondary)
             Text("Live dynamic internal resolution requires game support. Auto can recommend a scale for the next launch; it does not resize the game’s live render targets.")
                 .font(.caption).foregroundStyle(.secondary)

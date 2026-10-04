@@ -384,6 +384,7 @@ uint64_t madeira_available_memory(void) { return os_proc_available_memory(); }
 void madeira_performance_cache_pressure(int level) {
     level = MAX(0, MIN(level, 2));
     atomic_store(&cachePressure, level);
+    if (level) { madeira_interpolation_gate(0, 0, 4); madeira_interpolation_pressure(); }
     atomic_fetch_add(&spatialGeneration, 1);
     dispatch_async(cacheQueue(), ^{
         // Only optional renderer-owned state is released. Live game resources,
@@ -429,6 +430,11 @@ void madeira_performance_snapshot(MadeiraPerformanceSnapshot *out) {
     metrics.pipeline_ms = 0; // peak preparation time since the last observation
     memcpy(sorted, intervals, count * sizeof(double));
     pthread_mutex_unlock(&samplesLock);
+    MadeiraInterpolationSnapshot flow; madeira_interpolation_snapshot(&flow);
+    out->generated_encoded_frames += flow.encoded;
+    out->generated_scheduled_frames = flow.scheduled; out->generated_presented_frames = flow.visible;
+    out->generated_presented_valid = flow.visible_valid; out->interpolation_status = flow.status;
+    out->interpolation_gpu_ms = flow.gpu_ms; out->interpolation_latency_ms = flow.added_latency_ms;
     out->effective_cap = atomic_load(&cap);
     if (count) {
         double sum = 0;
@@ -508,6 +514,7 @@ BOOL madeira_performance_present(id<MTLCommandBuffer> buffer,
             pthread_mutex_unlock(&samplesLock);
         }];
     }
+    if (madeira_interpolation_present(buffer, drawable)) return YES;
     if (targetFPS < 0) return NO;
     [buffer presentDrawable:drawable];
     return YES;

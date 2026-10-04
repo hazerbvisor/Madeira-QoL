@@ -354,6 +354,8 @@ struct LibraryEntry: Codable, Identifiable {
         let size = resolution.split(separator: "x").compactMap { Int($0) }
         let validDisplay = size.count == 2 && (320...4096).contains(size[0]) && (240...4096).contains(size[1])
         let fx = validDisplay && spatialCompatible && performanceUpgrade?.fxMode != nil && performanceUpgrade?.fxMode != .off
+        let interpolation = performanceUpgrade?.interpolation ?? .off
+        madeira_interpolation_configure(spatialCompatible && validDisplay ? (interpolation == .double ? 1 : interpolation == .auto ? 2 : 0) : 0)
         let spatial = madeira_spatial_configure(fx ? 1 : 0, validDisplay ? Int32(size[0]) : 0, validDisplay ? Int32(size[1]) : 0) != 0
         if spatial { setenv("DXMT_METALFX_SPATIAL_SWAPCHAIN", "0", 1) } // avoid two independent upscalers
         // "The game"'s identity and working folder for this launch only (the bridge

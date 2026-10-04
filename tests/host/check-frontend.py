@@ -99,6 +99,8 @@ enum GamepadInput { static let keyboardMouseAvailable = true }   // LibraryEntry
 enum LibraryError: LocalizedError { case message(String) }
 enum RendererCaches { static func prepare(_ entry: LibraryEntry) {} }
 var spatialDevice: Int32 = 0
+var interpolationMode: Int32 = 0
+func madeira_interpolation_configure(_ mode: Int32) { interpolationMode = mode }
 func madeira_spatial_supported() -> Int32 { spatialDevice }
 func madeira_spatial_configure(_ enabled: Int32, _ width: Int32, _ height: Int32) -> Int32 { enabled * spatialDevice }
 func env(_ name: String) -> String? { getenv(name).map { String(cString: $0) } }
@@ -264,7 +266,9 @@ var nativeFX = unsupportedFX; nativeFX.bits = 32; nativeFX.graphicsAPI = "D3D9"
 let nativeSize = nativeFX.performanceUpgrade!.internalResolution(outputWidth: 1560, outputHeight: 720)
 expect(nativeFX.spatialCompatible && nativeFX.sessionResolution == "\(nativeSize.width)x\(nativeSize.height)",
        "native 32-bit D3D9 requests the explicit lower monitor")
+nativeFX.performanceUpgrade?.interpolation = .double
 nativeFX.configureLaunch()
+expect(interpolationMode == 1, "local D3D9 starts the optical-flow backend independently of Spatial")
 expect(env("DXMT_METALFX_SPATIAL_SWAPCHAIN") == "0", "one host spatial path suppresses the independent guest upscaler")
 nativeFX.bits = 64
 expect(nativeFX.spatialCompatible && nativeFX.sessionResolution != nativeFX.resolution, "64-bit D3D9 uses the native drawable-texture bridge")
@@ -276,11 +280,19 @@ nativeFX.graphicsAPI = "D3D9"; MadeiraConfig.values["d3d9"] = "emulated"
 expect(nativeFX.spatialCompatible, "emulated i386 Presenter uses the same native drawable-texture bridge")
 nativeFX.graphicsAPI = "D3D12"
 expect(!nativeFX.spatialCompatible, "unvalidated D3D12 is excluded")
+nativeFX.configureLaunch(); expect(interpolationMode == 0, "D3D12 excludes optical-flow launch")
 nativeFX.graphicsAPI = "D3D9"; nativeFX.desktop = true
 expect(!nativeFX.spatialCompatible, "desktop composition is excluded")
+nativeFX.configureLaunch(); expect(interpolationMode == 0, "desktop excludes optical-flow launch")
 nativeFX.desktop = false
 MadeiraConfig.values["d3d9"] = "native"; MadeiraConfig.values["remote"] = "diagnostic remote backend"
 expect(!nativeFX.spatialCompatible, "remote Metal handles are excluded from local MetalFX")
+nativeFX.configureLaunch(); expect(interpolationMode == 0, "remote Metal excludes optical-flow launch")
+MadeiraConfig.values["remote"] = nil; nativeFX.performanceUpgrade?.fxMode = .off
+nativeFX.performanceUpgrade?.interpolation = .auto
+nativeFX.configureLaunch(); expect(interpolationMode == 2, "Auto optical flow does not require Spatial upscaling")
+nativeFX.performanceUpgrade?.interpolation = .off
+nativeFX.configureLaunch(); expect(interpolationMode == 0, "Off launch resets previous interpolation mode")
 MadeiraConfig.values["d3d9"] = nil; MadeiraConfig.values["remote"] = nil; spatialDevice = 0
 
 // Layout: the presented rect and the touch mapping for each mode.

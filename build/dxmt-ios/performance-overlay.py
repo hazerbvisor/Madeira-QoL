@@ -46,7 +46,7 @@ once('  params->ret = (obj_handle_t)[(id<CAMetalDrawable>)params->handle texture
 once('  params->ret = (obj_handle_t)[(CAMetalLayer *)params->handle nextDrawable];',
      '  params->ret = (obj_handle_t)madeira_spatial_next_drawable((CAMetalLayer *)params->handle);')
 once('    if (enabled) props->contents_scale = 1.0;',
-     '    if (enabled || madeira_spatial_requested()) props->contents_scale = 1.0;')
+     '    if (enabled || madeira_spatial_requested() || madeira_interpolation_requested()) props->contents_scale = 1.0;')
 once('  props->drawable_width = layer.drawableSize.width;', '''  props->drawable_width = layer.drawableSize.width;
   // A guest Presenter must inherit its own viewport dimensions, not the host's
   // enlarged output. This also applies to secondary swapchains on the same layer.
