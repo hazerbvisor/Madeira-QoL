@@ -2,7 +2,7 @@
 
 This bundle contains the compiled Madeira app from PR #2, including performance
 profiles, local DXMT Spatial upscaling and experimental optical-flow interpolation.
-It is built from source commit `4781dcbbd2038171970495dadb75894f53fe5a6e`.
+It is built from source commit `5fe4936ac8b7695a926a55a415a2475afcd121af`.
 
 [Download PR #2 as ZIP, including both app archive parts](https://github.com/hazerbvisor/Madeira-QoL/archive/refs/heads/feature/madeira-performance-upgrade.zip)
 
@@ -29,7 +29,11 @@ size limit. Its IPA uses standard uncompressed ZIP entries; extracted app files
 and their permissions match the tested compressed IPA exactly. The expanded IPA
 is roughly 508 MiB, so allow enough space for extraction and installation.
 
-The full app/helper build and 14 host suites passed. Actual Metal execution,
+This preview includes the mixed-renderer eligibility fix and specific disabled
+reasons. Choose ETS2’s DirectX 11 mode and configure its game EXE entry.
+
+The full app/helper rebuild and affected frontend, renderer detection and spatial
+routing tests passed; the earlier 14-suite interpolation checkpoint also passed. Actual Metal execution,
 iPad image quality and displayed cadence remain unverified. See
 [the implementation report](../../docs/PERFORMANCE_IMPLEMENTATION.md) and
 [PR #2](https://github.com/hazerbvisor/Madeira-QoL/pull/2).
