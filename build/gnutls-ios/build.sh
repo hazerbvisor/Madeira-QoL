@@ -113,3 +113,10 @@ echo
 echo "=== static libs in $PREFIX/lib ==="
 ls -la "$PREFIX/lib/"*.a
 lipo -info "$PREFIX/lib/libgnutls.a" 2>/dev/null || true
+
+# Link freshly built archives, rather than the historical tracked copies.
+for lib in gmp nettle hogweed gnutls; do
+    [ -s "$PREFIX/lib/lib$lib.a" ] || { echo "Missing crypto build product: lib$lib.a" >&2; exit 1; }
+    "$RANLIB" "$PREFIX/lib/lib$lib.a"
+    cp "$PREFIX/lib/lib$lib.a" "$REPO_ROOT/app/Madeira/lib$lib.a"
+done

@@ -77,7 +77,7 @@ compile_objc() {
         -c "$src" -o "$OBJ_DIR/$name.o" 2>"$OBJ_DIR/$name.err"; then
         echo "OK"; SUCCEEDED=$((SUCCEEDED+1))
     else
-        echo "FAILED"; FAILED=$((FAILED+1)); FAILED_FILES="$FAILED_FILES $name"
+        echo "FAILED"; cat "$OBJ_DIR/$name.err" >&2; FAILED=$((FAILED+1)); FAILED_FILES="$FAILED_FILES $name"
     fi
 }
 
@@ -91,7 +91,7 @@ compile_cxx() {
         -c "$src" -o "$OBJ_DIR/$name.o" 2>"$OBJ_DIR/$name.err"; then
         echo "OK"; SUCCEEDED=$((SUCCEEDED+1))
     else
-        echo "FAILED"; FAILED=$((FAILED+1)); FAILED_FILES="$FAILED_FILES $name"
+        echo "FAILED"; cat "$OBJ_DIR/$name.err" >&2; FAILED=$((FAILED+1)); FAILED_FILES="$FAILED_FILES $name"
     fi
 }
 
@@ -104,7 +104,7 @@ compile_madeira_cxx() {
         -c "$src" -o "$OBJ_DIR/$name.o" 2>"$OBJ_DIR/$name.err"; then
         echo "OK"; SUCCEEDED=$((SUCCEEDED+1))
     else
-        echo "FAILED"; FAILED=$((FAILED+1)); FAILED_FILES="$FAILED_FILES $name"
+        echo "FAILED"; cat "$OBJ_DIR/$name.err" >&2; FAILED=$((FAILED+1)); FAILED_FILES="$FAILED_FILES $name"
     fi
 }
 
@@ -116,7 +116,7 @@ compile_madeira_c() {
         -c "$src" -o "$OBJ_DIR/$name.o" 2>"$OBJ_DIR/$name.err"; then
         echo "OK"; SUCCEEDED=$((SUCCEEDED+1))
     else
-        echo "FAILED"; FAILED=$((FAILED+1)); FAILED_FILES="$FAILED_FILES $name"
+        echo "FAILED"; cat "$OBJ_DIR/$name.err" >&2; FAILED=$((FAILED+1)); FAILED_FILES="$FAILED_FILES $name"
     fi
 }
 
@@ -134,7 +134,7 @@ compile_objcxx_arc() {
         -c "$src" -o "$OBJ_DIR/$name.o" 2>"$OBJ_DIR/$name.err"; then
         echo "OK"; SUCCEEDED=$((SUCCEEDED+1))
     else
-        echo "FAILED"; FAILED=$((FAILED+1)); FAILED_FILES="$FAILED_FILES $name"
+        echo "FAILED"; cat "$OBJ_DIR/$name.err" >&2; FAILED=$((FAILED+1)); FAILED_FILES="$FAILED_FILES $name"
     fi
 }
 if [[ -f "$BUILD_DIR/../madeira-d3d12/deps.sh" ]] && \
@@ -197,7 +197,7 @@ for cpp in BlobContainer.cpp DXBCUtils.cpp ShaderBinary.cpp; do
             -c "$DXMT_ROOT/libs/DXBCParser/$cpp" -o "$OBJ_DIR/$name.o" 2>"$OBJ_DIR/$name.err"; then
         echo "OK"; SUCCEEDED=$((SUCCEEDED+1))
     else
-        echo "FAILED"; FAILED=$((FAILED+1)); FAILED_FILES="$FAILED_FILES $name"
+        echo "FAILED"; cat "$OBJ_DIR/$name.err" >&2; FAILED=$((FAILED+1)); FAILED_FILES="$FAILED_FILES $name"
     fi
 done
 

@@ -42,7 +42,8 @@ workflows:
           if [ "$MADEIRA_CLEAN_NATIVE" = "1" ]; then
             bash build/codemagic/clean-native.sh
           fi
-          bash build/codemagic/build-native.sh
+          mkdir -p artifacts
+          bash build/codemagic/build-native.sh 2>&1 | tee artifacts/native-build.log
       - name: Validate every Xcode static link input
         script: |
           set -euo pipefail
@@ -70,5 +71,9 @@ workflows:
     artifacts:
       - artifacts/Madeira-QoL.ipa
       - artifacts/xcodebuild.log
+      - artifacts/native-build.log
+      - build/**/*.log
+      - toolchains/llvm-host-build/CMakeFiles/CMakeConfigureLog.yaml
+      - toolchains/llvm-ios-build/CMakeFiles/CMakeConfigureLog.yaml
       - build/**/*.err
       - build/**/err-*.txt

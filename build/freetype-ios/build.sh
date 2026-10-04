@@ -16,6 +16,7 @@ SRC="$REPO_ROOT/research/freetype"
 
 cmake -S "$SRC" -B "$BUILD_DIR/build" -G "Unix Makefiles" \
   -DCMAKE_SYSTEM_NAME=iOS \
+  -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
   -DCMAKE_OSX_ARCHITECTURES=arm64 \
   -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \
   -DCMAKE_OSX_SYSROOT="$(xcrun --sdk iphoneos --show-sdk-path)" \

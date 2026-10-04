@@ -18,7 +18,7 @@ fi
 git -C "$SRC" checkout --detach "$REV"
 # Include the SDK/compiler identity in cache validity. Empty caches take the
 # exact same configure/build path; no archive is imported from an IPA.
-STAMP="$REV|$(xcodebuild -version)|$(xcrun --sdk iphoneos --show-sdk-version)|v2"
+STAMP="$REV|$(xcodebuild -version)|$(xcrun --sdk iphoneos --show-sdk-version)|v3"
 if [ "$(cat "$IOS/madeira-build-key" 2>/dev/null || true)" != "$STAMP" ]; then
     rm -rf "$HOST" "$IOS"
 fi
@@ -30,7 +30,7 @@ COMMON=(-G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_TO_BUILD=
 cmake -S "$SRC/llvm" -B "$HOST" "${COMMON[@]}"
 cmake --build "$HOST" --target llvm-tblgen --parallel "$JOBS"
 cmake -S "$SRC/llvm" -B "$IOS" "${COMMON[@]}" \
-    -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64 \
+    -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=aarch64 -DCMAKE_OSX_ARCHITECTURES=arm64 \
     -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 \
     -DLLVM_HOST_TRIPLE=arm64-apple-ios17.0 -DLLVM_DEFAULT_TARGET_TRIPLE=arm64-apple-ios17.0 \
     -DLLVM_TARGET_ARCH=host -DLLVM_BUILD_TOOLS=OFF \

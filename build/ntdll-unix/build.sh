@@ -42,6 +42,7 @@ compile_one() {
         SUCCEEDED=$((SUCCEEDED + 1))
     else
         echo "FAILED"
+        cat "$OBJ_DIR/$name.err" >&2
         FAILED=$((FAILED + 1))
         FAILED_FILES="$FAILED_FILES $name"
     fi
@@ -77,6 +78,7 @@ compile_unixlib() {
         SUCCEEDED=$((SUCCEEDED + 1))
     else
         echo "FAILED"
+        cat "$OBJ_DIR/$name.err" >&2
         FAILED=$((FAILED + 1))
         FAILED_FILES="$FAILED_FILES $name"
     fi
@@ -106,11 +108,11 @@ compile_unixlib "$WINE_SRC/dlls/secur32/schannel_gnutls.c" "secur32_unixlib" "se
 # __wine_unix_call from dwrite.dll failed and get_glyph_bbox never ran —
 # every glyph run reported an EMPTY bbox and Chromium drew no text at all.
 # freetype is static here, so dwrite_freetype_ios.c rewrites dlopen/dlsym.
-# dwrite.h/dwrite_3.h are widl-generated and only exist in the arm64ec
-# build tree, so that include dir is named explicitly here.
+# The host WIDL bootstrap generates dwrite headers in $WINE_BUILD/include.
+# FreeType has a configured ftconfig.h in its build include directory.
 compile_unixlib "$BUILD_DIR/dwrite_freetype_ios.c" "dwrite_unixlib" "dwrite" \
     -I"$WINE_SRC/dlls/dwrite" -I"$REPO_ROOT/research/freetype/include" \
-    -I"$REPO_ROOT/wine/build-arm64ec/include"
+    -I"$REPO_ROOT/build/freetype-ios/build/include"
 compile_unixlib "$CRYPTO_DIR/crypt32_unixlib_ios.c" "crypt32_unixlib" "crypt32" \
     -I"$WINE_SRC/dlls/crypt32" -I"$GNUTLS_PREFIX/include" \
     -include "$CRYPTO_DIR/ios_gnutls_shim.h"
@@ -160,6 +162,7 @@ if xcrun -sdk iphoneos clang \
     SUCCEEDED=$((SUCCEEDED + 1))
 else
     echo "FAILED"
+    cat "$OBJ_DIR/wg_parser_apple_ios.err" >&2
     FAILED=$((FAILED + 1))
     FAILED_FILES="$FAILED_FILES wg_parser_apple_ios"
 fi
