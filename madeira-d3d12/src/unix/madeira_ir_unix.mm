@@ -353,11 +353,16 @@ static void mad_sc_hash_add(uint64_t *h, const void *p, size_t n)
  * shares the directory under its own extension. */
 static int mad_sc_path_ext(uint64_t key, const char *ext, char *out, size_t cap)
 {
-    const char *docs = getenv( "MADEIRA_DOCS_DIR" );
-    if (!docs || !*docs) return 0;
-    if (snprintf(out, cap, "%s/shadercache", docs) >= (int)cap) return 0;
-    mkdir(out, 0755);   /* harmless if it exists */
-    if (snprintf(out, cap, "%s/shadercache/%016llx.%s", docs,
+    const char *directory = getenv("MADEIRA_SHADER_CACHE_PATH");
+    char legacy[4096];
+    if (!directory || !*directory) {
+        const char *docs = getenv("MADEIRA_DOCS_DIR");
+        if (!docs || !*docs || snprintf(legacy, sizeof(legacy), "%s/shadercache", docs) >= (int)sizeof(legacy)) return 0;
+        directory = legacy;
+    }
+    if (snprintf(out, cap, "%s", directory) >= (int)cap) return 0;
+    mkdir(out, 0755);   /* harmless if it exists; writes below fail safely */
+    if (snprintf(out, cap, "%s/%016llx.%s", directory,
                  (unsigned long long)key, ext) >= (int)cap) return 0;
     return 1;
 }

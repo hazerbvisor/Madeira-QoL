@@ -133,6 +133,9 @@
 		A1000281 /* Winios/WiniosCursor.c in Sources */ = {isa = PBXBuildFile; fileRef = A2000281 /* Winios/WiniosCursor.c */; };
 		A1000245 /* TouchGamepad.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000245 /* TouchGamepad.swift */; };
 		A1000246 /* TouchControlPresets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000246 /* TouchControlPresets.swift */; };
+		B90000000000000000000200 /* PerformanceBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000100 /* PerformanceBridge.m */; };
+		B90000000000000000000203 /* PerformancePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000103 /* PerformancePolicy.swift */; };
+		B90000000000000000000204 /* RendererCaches.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000104 /* RendererCaches.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -311,6 +314,11 @@
 		A2000281 /* Winios/WiniosCursor.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "Winios/WiniosCursor.c"; sourceTree = "<group>"; };
 		A2000245 /* TouchGamepad.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TouchGamepad.swift; sourceTree = "<group>"; };
 		A2000246 /* TouchControlPresets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TouchControlPresets.swift; sourceTree = "<group>"; };
+		B90000000000000000000100 /* PerformanceBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PerformanceBridge.m; sourceTree = "<group>"; };
+		B90000000000000000000101 /* PerformanceBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PerformanceBridge.h; sourceTree = "<group>"; };
+		B90000000000000000000102 /* FrameDeadline.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FrameDeadline.h; sourceTree = "<group>"; };
+		B90000000000000000000103 /* PerformancePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformancePolicy.swift; sourceTree = "<group>"; };
+		B90000000000000000000104 /* RendererCaches.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererCaches.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -443,6 +451,11 @@
 				A2000202 /* FPSOverlay.swift */,
 				A2000400 /* Library.swift */,
 				A2000401 /* GuestDisplay.swift */,
+				B90000000000000000000104 /* RendererCaches.swift */,
+				B90000000000000000000103 /* PerformancePolicy.swift */,
+				B90000000000000000000102 /* FrameDeadline.h */,
+				B90000000000000000000101 /* PerformanceBridge.h */,
+				B90000000000000000000100 /* PerformanceBridge.m */,
 				A2000004 /* JITAllocator.c */,
 				A2000005 /* JITAllocator.h */,
 				A200000B /* FEXBridge.mm */,
@@ -746,6 +759,9 @@
 				A1000202 /* FPSOverlay.swift in Sources */,
 				A1000400 /* Library.swift in Sources */,
 				A1000401 /* GuestDisplay.swift in Sources */,
+				B90000000000000000000204 /* RendererCaches.swift in Sources */,
+				B90000000000000000000203 /* PerformancePolicy.swift in Sources */,
+				B90000000000000000000200 /* PerformanceBridge.m in Sources */,
 				A1000004 /* JITAllocator.c in Sources */,
 				A1000005 /* EntitlementChecker.swift in Sources */,
 				A1000006 /* FEXBridge.mm in Sources */,

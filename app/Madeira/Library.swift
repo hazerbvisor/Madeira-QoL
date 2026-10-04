@@ -172,6 +172,7 @@ struct LibraryEntry: Codable, Identifiable {
     var display: String?
     /// FPS limit: 1 = 60, 3 = 30, 0 = display maximum, 2 = uncapped (madeira_set_vsync_locked).
     var fpsMode = 1
+    var performanceUpgrade: PerformanceProfile?
     /// FEX's X87ReducedPrecision for this game. Off by default, as in FEX; only
     /// an explicit choice exports FEX_X87REDUCEDPRECISION=1.
     var reducedX87 = false
@@ -302,6 +303,7 @@ struct LibraryEntry: Codable, Identifiable {
     /// Runs on the launch worker, before the JIT pool is taken.
     func applyEnvironment() {
         configureLaunch()
+        RendererCaches.prepare(self)
         // Unset unless chosen: FEX's own default then applies, as for any other launch.
         if reducedX87 { setenv("FEX_X87REDUCEDPRECISION", "1", 1) } else { unsetenv("FEX_X87REDUCEDPRECISION") }
         // Exported only when chosen: unset keeps the engine's own default (and any
@@ -887,6 +889,8 @@ final class LibraryModel: ObservableObject {
         LibraryController.shared.configure(enabled: enabled, ownsInput: enabled)
         MetalHostView.shared.isHidden = true
         ProMotionIntent.shared.setActive(false)
+        RendererCaches.finish()
+        madeira_performance_set_telemetry(0)
         fputs("[frontend] returned to library\n", stderr)
     }
 }
