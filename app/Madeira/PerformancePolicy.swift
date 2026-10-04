@@ -18,6 +18,17 @@ enum MouseCaptureBehavior: String, Codable, CaseIterable {
     case automatic, manual, disabled
 }
 
+enum MadeiraFXRenderer: String, Codable, CaseIterable {
+    case automatic, d3d11, d3d9
+    var label: String {
+        switch self {
+        case .automatic: return "Auto detect"
+        case .d3d11: return "Direct3D 11 (DXMT)"
+        case .d3d9: return "Direct3D 9 (DXMT)"
+        }
+    }
+}
+
 enum FrameInterpolationMode: String, Codable, CaseIterable {
     case off, double, auto
 }
@@ -27,6 +38,7 @@ enum FrameInterpolationMode: String, Codable, CaseIterable {
 struct PerformanceProfile: Codable, Equatable {
     var fpsCap: Int?
     var fxMode: MadeiraFXMode = .off
+    var fxRenderer: MadeiraFXRenderer = .automatic
     var renderScale: Double = 1
     var dynamicResolution = false
     var minimumScale: Double = 0.5
@@ -44,7 +56,7 @@ struct PerformanceProfile: Codable, Equatable {
 
     init() {}
     enum CodingKeys: String, CodingKey {
-        case fpsCap, fxMode, renderScale, dynamicResolution, minimumScale, maximumScale
+        case fpsCap, fxMode, fxRenderer, renderScale, dynamicResolution, minimumScale, maximumScale
         case automaticPerformance, fullscreen, mouseCapture, mouseSensitivity, interpolation
         case nextLaunchScale, lastAutoFPS, lastAutoDecision
     }
@@ -53,6 +65,7 @@ struct PerformanceProfile: Codable, Equatable {
         fpsCap = try? c.decode(Int.self, forKey: .fpsCap)
         if let cap = fpsCap, !Self.fpsCaps.contains(cap) { fpsCap = nil }
         fxMode = (try? c.decode(MadeiraFXMode.self, forKey: .fxMode)) ?? .off
+        fxRenderer = (try? c.decode(MadeiraFXRenderer.self, forKey: .fxRenderer)) ?? .automatic
         renderScale = (try? c.decode(Double.self, forKey: .renderScale)) ?? 1
         minimumScale = (try? c.decode(Double.self, forKey: .minimumScale)) ?? 0.5
         maximumScale = (try? c.decode(Double.self, forKey: .maximumScale)) ?? 1

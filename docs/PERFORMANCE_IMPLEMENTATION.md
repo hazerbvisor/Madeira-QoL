@@ -448,3 +448,28 @@ addresses the confirmed metadata bug; iPad diagnostics identify other causes.
 The eligibility-fix app/helper release build passed in **129.66 seconds**.
 The new regression tests and renderer scanner/spatial suites passed; the PR #2
 unsigned bundle is refreshed from this source revision.
+
+### Dynamically loaded renderers and per-game selection
+
+The iPad screenshot confirmed unknown renderer metadata for a real 64-bit
+`eurotrucks2.exe` entry. The details page previously read only ordinary imports;
+it now awaits the existing background import-graph/dynamic-name scanner. Dynamic
+probing additionally prioritizes bounded PE `.rdata`/`.data` windows before
+head/tail fallback, retaining the search budget and malformed-file guards. The
+metadata revision increments so existing entries can be rescanned.
+
+MadeiraFX also exposes a saved **Game renderer: Auto detect / Direct3D 11 (DXMT)
+/ Direct3D 9 (DXMT)** choice. Explicit intent permits configuration when a game
+loads its renderer dynamically and scanning remains inconclusive. It does not
+rewrite observed metadata or change the game's selected renderer. Desktop,
+remote, executable architecture, device and actual local DXMT frame checks
+remain in force. Select DX11 mode inside ETS2 and the matching per-game choice,
+then Quality and a stable native FPS cap. Auto detect remains the migration
+default; old profiles retain their behavior.
+
+The app/helper release build passed in **149.41 seconds** and all **15 host
+suites** passed. New tests exercise a DLL name in a PE data section missed by
+head/tail reads, malformed offsets, read budgets, explicit-intent persistence,
+legacy/future defaults and exclusion checks that a manual choice cannot bypass.
+The refreshed unsigned PR #2 bundle includes this source revision. Actual iPad
+Metal execution and image quality remain device tests.

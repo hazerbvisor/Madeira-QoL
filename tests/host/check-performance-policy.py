@@ -44,9 +44,9 @@ let encoder = JSONEncoder()
 let defaults = try decoder.decode(PerformanceProfile.self, from: Data("{}".utf8))
 assert(defaults == PerformanceProfile())
 let future = try decoder.decode(PerformanceProfile.self, from: Data("""
-{"fxMode":"future","fpsCap":999,"mouseSensitivity":-4,"minimumScale":0.1,"maximumScale":2,"renderScale":9,"interpolation":"future"}
+{"fxMode":"future","fpsCap":999,"mouseSensitivity":-4,"minimumScale":0.1,"maximumScale":2,"renderScale":9,"interpolation":"future","fxRenderer":"future"}
 """.utf8))
-assert(future.fxMode == .off && future.fpsCap == nil && future.interpolation == .off)
+assert(future.fxMode == .off && future.fpsCap == nil && future.interpolation == .off && future.fxRenderer == .automatic)
 assert(future.renderScale == 1 && future.minimumScale == 0.5 && future.maximumScale == 1)
 assert(future.mouseSensitivity == 0.1)
 for cap in PerformanceProfile.fpsCaps {
@@ -55,6 +55,11 @@ for cap in PerformanceProfile.fpsCaps {
     assert(restored == p)
     let size = p.internalResolution(outputWidth: 1280, outputHeight: 960)
     assert(size.width == 922 && size.height == 691)
+}
+for hint in MadeiraFXRenderer.allCases {
+    var selected = PerformanceProfile(); selected.fxRenderer = hint
+    let restored = try decoder.decode(PerformanceProfile.self, from: encoder.encode(selected))
+    assert(restored == selected && restored.fxRenderer == hint)
 }
 var malformed = PerformanceProfile(); malformed.renderScale = .infinity; malformed.mouseSensitivity = .nan
 malformed.normalize()

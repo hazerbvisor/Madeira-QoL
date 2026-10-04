@@ -59,6 +59,11 @@ struct MadeiraFXSettings: View {
     private var supported: Bool { compatible && madeira_spatial_supported() != 0 }
     var body: some View {
         Section("MadeiraFX") {
+            Picker("Game renderer", selection: $profile.fxRenderer) {
+                ForEach(MadeiraFXRenderer.allCases, id: \.self) { Text($0.label).tag($0) }
+            }
+            Text("Select the renderer you use in-game if Auto detect cannot identify it. Choose DirectX 11 mode in ETS2. Effects activate only when local DXMT renders frames; changes apply at the next launch.")
+                .font(.caption).foregroundStyle(.secondary)
             Picker("Spatial preset", selection: Binding(get: { profile.fxMode }, set: {
                 profile.fxMode = $0; profile.renderScale = $0.recommendedScale; profile.nextLaunchScale = nil; profile.normalize()
                 if $0 == .auto { profile.automaticPerformance = true }

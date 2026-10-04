@@ -257,8 +257,11 @@ struct LibraryEntry: Codable, Identifiable {
         }
         if desktop == true { return "Open the game’s own library entry; MadeiraFX is unavailable for Wine Desktop." }
         if bits != 32 && bits != 64 { return "The game entry needs a supported 32-bit or 64-bit executable." }
+        // Explicit per-game intent allows dynamic renderers that metadata cannot identify.
+        // Actual effects still require the local DXMT drawable hooks and GPU capabilities.
+        if let renderer = performanceUpgrade?.fxRenderer, renderer != .automatic { return nil }
         let api = graphicsAPI?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if api.isEmpty { return "The game’s renderer has not been identified. Select its actual game EXE instead of a launcher." }
+        if api.isEmpty { return "Auto detect has not identified the game’s renderer. Choose Direct3D 11 or 9 in Game renderer to match the renderer you use in-game." }
         // Metadata lists every renderer the game can use, not the active one.
         // Import and installation scans use different slash/whitespace formats.
         let apis = Set(api.split(separator: "/").map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() })
@@ -562,7 +565,7 @@ final class LibraryModel: ObservableObject {
     /// Install size and graphics API, at most once a day per entry.
     @MainActor
     func refreshMetadata(_ id: UUID) async {
-        let revision = 12
+        let revision = 13
         guard !metadataInFlight.contains(id), let entry = entries.first(where: { $0.id == id }), entry.desktop != true,
               entry.metadataRevision != revision || Date().timeIntervalSince(entry.metadataChecked ?? .distantPast) > 86400,
               let url = try? Self.executable(entry.relativePath) else { return }
@@ -976,10 +979,48 @@ private actor LibraryMetadataScanner {
         let window = min(budget, 4 * 1024 * 1024)
         var result = Set<String>()
         let names = ["ddraw.dll", "d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll", "d3d11.dll", "d3d12.dll", "opengl32.dll", "vulkan-1.dll"]
-        for offset in [UInt64(0), length > UInt64(window) ? length - UInt64(window) : 0] {
+        // PE read-only/data sections often sit between a large code section and
+        // resources. Prioritize these bounded probes before head/tail fallback.
+        func u32(_ bytes: Data, _ offset: Int) -> UInt32 {
+            guard offset >= 0, offset + 4 <= bytes.count else { return 0 }
+            return (0..<4).reduce(0) { $0 | UInt32(bytes[offset + $1]) << ($1 * 8) }
+        }
+        var probes: [(UInt64, Int)] = []
+        try? handle.seek(toOffset: 0)
+        if let dos = try? handle.read(upToCount: 64), dos.count == 64 {
+            let base = UInt64(u32(dos, 60))
+            if base <= length, length - base >= 24, base < 16 * 1024 * 1024 {
+                try? handle.seek(toOffset: base)
+                if let header = try? handle.read(upToCount: 24), header.count == 24, u32(header, 0) == 0x4550 {
+                    let count = Int(header[6]) | Int(header[7]) << 8
+                    let optionalSize = Int(header[20]) | Int(header[21]) << 8
+                    let start = base + 24 + UInt64(optionalSize)
+                    if count > 0, count <= 96, start <= length, UInt64(count * 40) <= length - start {
+                        try? handle.seek(toOffset: start)
+                        if let table = try? handle.read(upToCount: count * 40), table.count == count * 40 {
+                            for index in 0..<count {
+                                let row = index * 40
+                                let name = String(decoding: table[row..<(row + 8)].prefix(while: { $0 != 0 }), as: UTF8.self).lowercased()
+                                guard name.hasPrefix(".rdata") || name.hasPrefix(".data") else { continue }
+                                let offset = UInt64(u32(table, row + 20)), size = UInt64(u32(table, row + 16))
+                                guard offset > 0, size > 0, offset <= length, size <= length - offset else { continue }
+                                let bytes = min(window, Int(size))
+                                probes.append((offset, bytes))
+                                if size > UInt64(bytes) { probes.append((offset + size - UInt64(bytes), bytes)) }
+                                if probes.count >= 4 { break }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        probes += [(0, window), (length > UInt64(window) ? length - UInt64(window) : 0, window)]
+        var visited = Set<UInt64>()
+        for (offset, count) in probes {
             guard budget > 0, !Task.isCancelled else { break }
+            if !visited.insert(offset).inserted { continue }
             try? handle.seek(toOffset: offset)
-            guard let bytes = try? handle.read(upToCount: min(window, budget)) else { break }
+            guard let bytes = try? handle.read(upToCount: min(count, budget)) else { break }
             budget -= bytes.count
             let folded = Data(bytes.map { $0 >= 65 && $0 <= 90 ? $0 + 32 : $0 })
             for name in names {
@@ -989,7 +1030,6 @@ private actor LibraryMetadataScanner {
                     result.formUnion(LibraryModel.apiNames([name]))
                 }
             }
-            if length <= UInt64(window) { break }
         }
         return result
     }
@@ -2592,7 +2632,12 @@ struct LibraryDetail: View {
                 Button("Remove", role: .destructive) { leaving = true; model.remove(entry.id); dismiss() }
             }
             .task {
-                if entry.graphicsAPI == nil, entry.desktop != true, let url = try? LibraryModel.executable(entry.relativePath) { entry.graphicsAPI = LibraryModel.graphicsImports(url) }
+                if entry.graphicsAPI == nil, entry.desktop != true, let url = try? LibraryModel.executable(entry.relativePath) {
+                    let path = entry.relativePath
+                    let result = await LibraryMetadataScanner.shared.scan(url, drive: LibraryModel.drive, countBytes: false)
+                    guard !Task.isCancelled, entry.relativePath == path, entry.graphicsAPI == nil else { return }
+                    entry.graphicsAPI = result.api
+                }
             }
             .onDisappear { if !leaving { model.save(entry) } }
             .onReceive(LibraryController.shared.commands) { command in

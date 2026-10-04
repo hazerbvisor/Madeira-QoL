@@ -285,7 +285,16 @@ nativeFX.configureLaunch(); expect(interpolationMode == 1, "multi-renderer games
 nativeFX.graphicsAPI = "D3D11 / D3D12"
 expect(nativeFX.spatialCompatible, "a DX11/DX12 game can configure DX11 without claiming DX12 support")
 nativeFX.graphicsAPI = nil
-expect(!nativeFX.spatialCompatible && nativeFX.spatialCompatibilityIssue?.contains("not been identified") == true, "unknown renderer stays disabled with an actionable reason")
+expect(!nativeFX.spatialCompatible && nativeFX.spatialCompatibilityIssue?.contains("not identified") == true, "unknown renderer stays disabled with an actionable reason")
+nativeFX.performanceUpgrade?.fxRenderer = .d3d11
+expect(nativeFX.spatialCompatible && nativeFX.graphicsAPI == nil, "explicit DX11 intent admits unknown metadata without fabricating an API observation")
+nativeFX.configureLaunch(); expect(interpolationMode == 1, "explicit DX11 intent configures the local interpolation backend")
+nativeFX.desktop = true; expect(!nativeFX.spatialCompatible, "renderer hint cannot bypass desktop exclusion")
+nativeFX.desktop = false; MadeiraConfig.values["remote"] = "host token"
+expect(!nativeFX.spatialCompatible, "renderer hint cannot bypass remote exclusion")
+MadeiraConfig.values["remote"] = nil; nativeFX.bits = 0
+expect(!nativeFX.spatialCompatible, "renderer hint cannot bypass unknown executable architecture")
+nativeFX.bits = 32; nativeFX.performanceUpgrade?.fxRenderer = .automatic
 nativeFX.graphicsAPI = "OpenGL"
 expect(!nativeFX.spatialCompatible && nativeFX.spatialCompatibilityIssue?.contains("OpenGL") == true, "OpenGL-only entries stay disabled with their detected renderer")
 nativeFX.graphicsAPI = "D3D9"; MadeiraConfig.values["d3d9"] = "emulated"
