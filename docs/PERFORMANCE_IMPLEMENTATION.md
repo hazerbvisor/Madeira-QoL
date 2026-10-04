@@ -93,3 +93,13 @@ Apple also restricts pointer lock to compatible fullscreen iPad scenes/raw
 mouse streams. These constraints must not be presented as universal capture.
 
 Phases 3–5 remain in progress. They are not part of the Phase 2 completion claim.
+
+Phase 2 release validation (2026-10-04): the app and JIT helper compiled and
+linked successfully with xtool 1.20.1, Swift 6.3.3 and the iPhoneOS 26.5 SDK on
+Linux (122.48 seconds). The changed winemetal and native Presenter objects were
+rebuilt against the Phase 2 source before linking; the inactive Phase 3 work
+was set aside during validation. Host suites passed: frontend/profile/layout,
+hardware input, gamepad transport, touch gamepad, control presets, performance
+policy/frame deadlines and interrupted touch input. Existing compiler/linker
+warnings remain; no compile error remains in the Phase 2 changes. The unsigned
+IPA still needs signing/installing and on-device runtime checks listed above.
