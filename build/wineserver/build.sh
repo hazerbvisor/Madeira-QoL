@@ -230,6 +230,9 @@ echo "=== Renaming colliding symbols in every .o (objcopy sweep) ==="
 OBJCOPY=$(command -v llvm-objcopy || echo /opt/homebrew/opt/llvm/bin/llvm-objcopy)
 [ -x "$OBJCOPY" ] || OBJCOPY=/opt/homebrew/Cellar/llvm/22.1.0/bin/llvm-objcopy
 COLLISIONS=(
+    # These are separate server state and ntdll client reply caches. Keeping
+    # both definitions in the single-process app also breaks the final link.
+    native_machine supported_machines supported_machines_count server_start_time
     alloc_user_handle free_user_handle get_virtual_screen_rect
     destroy_thread_windows get_window_thread is_desktop_class
     is_message_class is_window_visible mirror_region send_notify_message

@@ -249,15 +249,35 @@ non-public `rusage_info_v6` page-wait field in `server_ios.c`. That diagnostic n
 prints `pgw=n/a`; its two printf-style logging format warnings were also corrected.
 The original failure was reproduced locally, then the entire corrected source was
 cross-compiled to an ARM64 iOS Mach-O object with Clang 21, iPhoneOS 26.5 headers
-and `-Werror=format`. The full ntdll archive and subsequent app build still need
-Codemagic validation.
+and `-Werror=format`. A subsequent Linux build compiled all 37 ntdll files and
+linked the complete application. The Codemagic workflow itself still needs a run.
 
-xtool 1.20.1 was installed and executed on Linux. `xtool dev build --ipa` rejects
-the app with `Could not find Package.swift in this directory`: xtool's build command
-accepts SwiftPM projects, while Madeira uses an Xcode project, an Objective-C++
-bridging header, an app extension and Metal compilation. A standalone iOS header
-SDK used for native C/C++ checks is also not xtool's full Darwin Swift SDK. No IPA
-was produced by that attempt.
+The first xtool attempt rejected the Xcode project because it had no
+`Package.swift`. After receiving an Xcode XIP, its Apple certificate chain,
+signature and archive checksums were verified, and xtool extracted and installed
+the full iPhoneOS 26.5 Darwin Swift SDK. With Swift 6.3.3 and xtool 1.20.1, a
+separate SwiftPM staging project then compiled the application's 72 original
+Swift/C/Objective-C/Objective-C++ translation units and its JIT helper on Linux.
+The source Xcode project was not replaced.
+
+The complete unsigned IPA was linked and packaged on Linux. All 20 linked native
+archives passed ARM64 iOS object checks (3,347 objects). This included new source
+builds of FFmpeg, FreeType, ntdll, wineserver, win32u, the Rust pairing library,
+the pinned LLVM component closure, and all 87 DXMT translation units; FEX and
+crypto used the previously verified archives. The final link exposed four
+additional wineserver/ntdll global symbol collisions. The existing wineserver
+symbol-renaming sweep now isolates those server globals and their references.
+
+Apple's Metal compiler was not executed on Linux. Matching compiled AIR/Metal
+shaders and 1,075 packaged resource files were reused from the verified upstream
+v0.1.3 IPA (SHA-256
+`71e900cbc140778bd6fa67c1062821981ed98e6bfb674d853cfeefd6d242e1c0`). That release
+is built from this fork's unchanged application baseline,
+`4e9d45a74294cd820120791c4b3f2b79adf4fc70`. Neither upstream application nor
+extension executables were used in the new IPA. Bundle IDs, icons, framework
+paths, resource hashes, executable permissions, ZIP integrity and ARM64 iOS
+Mach-O headers were checked. The app retains iOS 17 as its deployment minimum
+and the helper retains iOS 26. No iPhone runtime test was performed.
 The prebuilt crypto headers compiled successfully with Wine's bcrypt, secur32
 and crypt32 translation units using Clang 21 and iPhoneOS 26.5 headers. All 69
 required Wine GnuTLS symbols are present in the tracked archive.

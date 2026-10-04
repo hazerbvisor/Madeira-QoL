@@ -165,3 +165,6 @@ app/Madeira/arm64ec-windows/dock-notices.txt
 # Native build outputs and Python helper bytecode.
 build/freetype-ios/build/
 build/codemagic/__pycache__/
+
+# Locally packaged app artifacts.
+/dist/
