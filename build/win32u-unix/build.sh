@@ -119,8 +119,7 @@ for src in $WINE_SRC/dlls/win32u/*.c $WINE_SRC/dlls/win32u/dibdrv/*.c; do
             # re-defines HAVE_FT2BUILD_H itself; config_ios.h's #undefs win
             # for every other TU.
             compile_one "$BUILD_DIR/freetype_ios.c" "freetype" \
-                -I"$FREETYPE_DIR/build/include" \
-                -I"$REPO_ROOT/research/freetype/include"
+                -I"$REPO_ROOT/toolchains/freetype-ios/include"
             continue
             ;;
     esac

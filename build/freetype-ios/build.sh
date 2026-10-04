@@ -27,4 +27,10 @@ cmake -S "$SRC" -B "$BUILD_DIR/build" -G "Unix Makefiles" \
   -DCMAKE_C_FLAGS="-fno-stack-protector"
 
 cmake --build "$BUILD_DIR/build" -j8
+# Keep public and configured headers with the reusable native output. Consumers
+# do not need the source checkout when this component is restored from cache.
+PREFIX="$REPO_ROOT/toolchains/freetype-ios"
+mkdir -p "$PREFIX/include"
+cp -R "$SRC/include/." "$PREFIX/include/"
+cp -R "$BUILD_DIR/build/include/." "$PREFIX/include/"
 echo "Done: $BUILD_DIR/build/libfreetype.a"

@@ -9,14 +9,14 @@ workflows:
         BUILD_JOBS: "8"
         MADEIRA_CLEAN_NATIVE: "0"
         MADEIRA_USE_PREBUILT_FEX: "1"
+        MADEIRA_USE_PREBUILT_CRYPTO: "1"
+        MADEIRA_REUSE_NATIVE: "1"
         # Microsoft runtime DLLs bootstrap automatically. Private overrides
         # remain available; see docs/CODEMAGIC.md.
     cache:
       cache_paths:
         - $CM_BUILD_DIR/toolchains/downloads
-        - $CM_BUILD_DIR/toolchains/llvm-project
-        - $CM_BUILD_DIR/toolchains/llvm-host-build
-        - $CM_BUILD_DIR/toolchains/llvm-ios-build
+        - $CM_BUILD_DIR/toolchains/native-cache
         - $HOME/.cargo/registry
         - $HOME/.cargo/git
         - $HOME/.ccache
@@ -35,9 +35,11 @@ workflows:
             rustup-init -y --no-modify-path --default-toolchain stable
           fi
           rustup target add aarch64-apple-ios
+          # Madeira's app target also compiles Metal UI shaders, even when
+          # all native dependency archives are reused.
           xcodebuild -downloadComponent MetalToolchain
           printf 'PATH=%s\n' "$PATH" >> "$CM_ENV"
-      - name: Stage precompiled FEX and build remaining native dependencies
+      - name: Reuse verified native libraries and build missing components
         script: |
           set -euo pipefail
           if [ "$MADEIRA_CLEAN_NATIVE" = "1" ]; then
@@ -73,6 +75,7 @@ workflows:
       - artifacts/Madeira-QoL.ipa
       - artifacts/xcodebuild.log
       - artifacts/native-build.log
+      - toolchains/native-cache/**/*.tar.gz
       - build/**/*.log
       - toolchains/llvm-host-build/CMakeFiles/CMakeConfigureLog.yaml
       - toolchains/llvm-ios-build/CMakeFiles/CMakeConfigureLog.yaml

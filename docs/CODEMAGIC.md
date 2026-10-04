@@ -50,8 +50,9 @@ produce this unsigned IPA. They are needed later when installing/running it.
 
 The default `MADEIRA_USE_PREBUILT_FEX=1` verifies and uses the **seven FEX libraries
 already cross-compiled for this branch**, plus their five generated headers. It
-skips FEX compilation. The remaining native dependencies still build from source;
-no completed Wine, DXMT or LLVM iOS archive was produced locally.
+skips FEX compilation. The four tracked crypto archives are also reused by
+default. Remaining dependencies use verified native caches and compile only on
+a cache miss. No completed Wine, DXMT or LLVM iOS archive was produced locally.
 
 `build/fex-ios/prebuilt-pins.json` pins the tracked archive path, archive SHA-256, each file's
 SHA-256, FEX revision, recursive dependency revisions and compatibility recipe
@@ -74,6 +75,61 @@ changing its revision or compatibility recipe. `MADEIRA_CLEAN_NATIVE=1` removes
 staged FEX outputs and restores the verified bundle on the next default build.
 The 948 KB compressed bundle is tracked in `build/fex-ios/prebuilt/`, so it is
 available in every checkout. Its checksum is checked on every invocation.
+
+## Reusing the remaining native components
+
+`MADEIRA_USE_PREBUILT_CRYPTO=1` reuses the four tracked GnuTLS/GMP/Nettle archives.
+Their pinned checksums and all 1,312 ARM64 iOS object members are validated. The
+GnuTLS 3.8.9 public headers are staged from the checksum-verified source tarball;
+its header template receives the same version and Darwin `iovec` definitions as
+upstream configure. No crypto source is compiled. Reading pinned archives from
+Git also restores them after `clean-native.sh` deletes the working copies. Set
+`MADEIRA_USE_PREBUILT_CRYPTO=0` for a source build instead.
+
+`MADEIRA_REUSE_NATIVE=1` enables a cache for each completed native component under
+`toolchains/native-cache`, including Wine headers, FFmpeg, FreeType, ntdll,
+wineserver, win32u, combined LLVM/DXMT, Rust pairing and Dock. Each successful
+component is saved locally immediately, before the next build stage starts. Libraries,
+generated public headers and generated license notices travel together. A
+restored FreeType component supplies its own headers without a source clone.
+
+The cache key covers tracked recipe/source contents, submodule revisions and
+local tracked edits, dependency keys, Xcode, the iOS SDK and compiler identity.
+Rust and objcopy identities are included for their consumers. Changing UI-only
+Swift code does not invalidate these native components. Every restored file is
+checksum-verified, every archive member must be ARM64 iOS Mach-O, and Dock must
+be x86-64 PE. Missing, mismatched or corrupt caches cause that component to rebuild;
+incomplete components are never saved. Old configure and `.done` state is removed
+before a fresh component build.
+
+Upstream releases provide an IPA, not separate static library archives. Therefore
+11 of the project's 20 libraries are available immediately from the checkout;
+the remaining nine need their first successful macOS build to populate this cache.
+The final app still needs Xcode compilation and linking. Codemagic exports its
+cache after a **successful build**, with a 14-day lifetime. The workflow also
+publishes `toolchains/native-cache/**/*.tar.gz` as build artifacts, so completed
+stages can be recovered from a failed build. It avoids caching the entire LLVM
+source/build trees, since the combined DXMT archive is sufficient for reuse.
+
+To restore artifacts from a failed build, set the secure Codemagic variable
+`MADEIRA_NATIVE_BUNDLE_URLS` to the download URLs of those component `.tar.gz`
+artifacts, one URL per line. URLs may carry credentials and should stay secure.
+Each bundle must match this checkout's sources and runner tool identities before
+it enters the local cache. Expired artifact URLs must be refreshed. A local copy
+can be imported on the matching macOS runner with:
+
+```sh
+python3 build/codemagic/native-cache.py import --bundle /path/to/component.tar.gz
+```
+
+Previous runs that did not publish these component bundles cannot supply them.
+The first build with this workflow still needs to produce the missing components.
+
+Set `MADEIRA_REUSE_NATIVE=0` to bypass native cache restoration.
+`MADEIRA_CLEAN_NATIVE=1` also bypasses it, while leaving the cache directory available
+for the next normal run. To rebuild every native component from source, set all
+three: `MADEIRA_CLEAN_NATIVE=1`, `MADEIRA_USE_PREBUILT_FEX=0` and
+`MADEIRA_USE_PREBUILT_CRYPTO=0`.
 
 ## Source bootstrap and caches
 
@@ -104,20 +160,20 @@ Crypto feature macros select the real statically linked iOS GnuTLS paths
 independently of the header-generation host's installed libraries. Newly built
 crypto archives are staged to the exact app link paths.
 
-Codemagic caches the LLVM source and host/iOS build directories, llvm-mingw
-release download, Cargo downloads and ccache. An SDK/Xcode/source recipe change
+Codemagic caches completed native components, llvm-mingw release downloads,
+Cargo downloads and ccache. LLVM source and build trees remain available during
+a run; the combined archive is cached for later builds. An SDK/Xcode/source recipe change
 invalidates LLVM products. No cache is needed for correctness: the scripts stage
-the tracked FEX bundle and configure and build the remaining dependencies when
-the directories are empty. llvm-mingw's documented
+the tracked FEX and crypto libraries, then build missing dependencies when
+the native cache is empty. llvm-mingw's documented
 20260421 tarball is SHA-256 checked on **every** invocation before extraction.
 FreeType is fetched at `42608f77f20749dd6ddc9e0536788eaad70ea4b5` (2.13.3).
 The tracked GnuTLS/GMP/Nettle and FFmpeg tarballs are checksum verified.
 
-The native build order prepares Wine's host config and the required WIDL header
-closure, rebuilds
-GnuTLS/GMP/Nettle and FFmpeg, stages precompiled FEX iOS (including JemallocLibs)
-by default, then builds FreeType, ntdll unix,
-wineserver, win32u unix, LLVM/DXMT, and the locked Rust pairing library. Dock's
+The native build order restores or prepares Wine's host config and required WIDL
+headers, stages tracked crypto, restores or builds FFmpeg, stages precompiled FEX
+iOS (including JemallocLibs), then restores or builds FreeType, ntdll unix,
+wineserver, win32u unix, LLVM/DXMT and the locked Rust pairing library. Dock's
 ignored PE resource is also built with llvm-mingw. Existing tracked guest Wine,
 FEX and D3D12 PE binaries remain bundled; unused optional WoW64 components are
 not compiled as part of the static library bootstrap.
@@ -134,9 +190,10 @@ in Madeira.xcodeproj:
 | win32u_unix | generated/composed | pinned Wine plus FreeType 2.13.3 |
 | dxmt_combined | generated/composed | pinned DXMT plus pinned LLVM dependency closure |
 | avformat, avcodec, swresample, avutil | built from source | tracked FFmpeg 7.1.1 tarball |
-| gnutls, hogweed, nettle, gmp | tracked/prebuilt, rebuilt from source in CI | tracked release tarballs |
+| gnutls, hogweed, nettle, gmp | tracked/prebuilt by default; source build optional | pinned tracked archives and release tarballs |
 | madeira_rppairing | built from source | Rust source and Cargo.lock |
 
+Source-built/composed rows reuse verified native cache entries when available.
 There are no unclassified archive references. The historical tracked
 `app/libdxmt_unix.a` is not linked by this Xcode project and is not consumed.
 Run `python3 build/codemagic/verify-link-inputs.py --audit` to print the inventory.
@@ -151,18 +208,22 @@ On macOS, with Xcode and the workflow build tools installed:
 ```sh
 git submodule update --init --recursive
 bash build/codemagic/clean-native.sh
-# Set MADEIRA_USE_PREBUILT_FEX=0 here for an entirely source-built native tree.
+# For every component from source, also export both prebuilt flags as 0.
+export MADEIRA_CLEAN_NATIVE=1
 bash build/codemagic/build-native.sh
 python3 build/codemagic/verify-link-inputs.py
 ```
 
 Set `MADEIRA_CLEAN_NATIVE=1` in Codemagic to perform this deletion after cache
-restoration. It removes all required native build trees, including wineserver,
+restoration, and bypass native cache reuse. It removes all required native build
+trees, including wineserver,
 DXMT combined/unix archives, FEX iOS, host/iOS LLVM, FreeType, Wine config,
 FFmpeg/GnuTLS outputs and Rust pairing products. It intentionally deletes the
-four tracked crypto archives locally, so they cannot mask a missing source build.
+four tracked crypto archives locally. The default then restores their pinned
+bytes from Git; disable the crypto prebuilt flag for an actual crypto source build.
 Use an empty Codemagic cache for the first validation run; subsequent normal runs
-can reuse LLVM products. Native output deletion never alters source submodules.
+can reuse all verified native components. Native output deletion never alters
+tracked source submodule files.
 
 Validation status: recursive checkout and the actual llvm-mingw download/checksum
 were verified in Linux. Automatic Microsoft runtime download/extraction was also
@@ -197,5 +258,11 @@ accepts SwiftPM projects, while Madeira uses an Xcode project, an Objective-C++
 bridging header, an app extension and Metal compilation. A standalone iOS header
 SDK used for native C/C++ checks is also not xtool's full Darwin Swift SDK. No IPA
 was produced by that attempt.
+The prebuilt crypto headers compiled successfully with Wine's bcrypt, secur32
+and crypt32 translation units using Clang 21 and iPhoneOS 26.5 headers. All 69
+required Wine GnuTLS symbols are present in the tracked archive.
+Native reuse checks passed locally, including source/SDK invalidation, dependency
+invalidation, corruption rejection, complete restoration of a real ARM64 archive
+with headers/notices, and rejection of incomplete components.
 This workflow is an unverified build candidate until a Codemagic run completes; it must not be presented as a successful
 clean build on the basis of scripts alone.

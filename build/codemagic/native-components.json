@@ -1,0 +1,212 @@
+{
+  "wine-headers": {
+    "inputs": [
+      "build/codemagic/wine-headers.sh",
+      "build/codemagic/wine-header-targets.py",
+      "build/ntdll-unix",
+      "build/wineserver",
+      "build/win32u-unix",
+      "build/crypto-unix",
+      "build/codemagic/toolchains.sh"
+    ],
+    "exclude": [
+      "build/crypto-unix/gnutls_symtab_ios.c"
+    ],
+    "submodules": [
+      "wine"
+    ],
+    "outputs": [
+      "wine/build-macos/include"
+    ],
+    "clean": [
+      "wine/build-macos"
+    ]
+  },
+  "crypto": {
+    "inputs": [
+      "build/gnutls-ios",
+      "build/codemagic/crypto-prebuilt.py"
+    ],
+    "variables": [
+      "MADEIRA_USE_PREBUILT_CRYPTO"
+    ],
+    "outputs": [
+      "app/Madeira/libgnutls.a",
+      "app/Madeira/libgmp.a",
+      "app/Madeira/libhogweed.a",
+      "app/Madeira/libnettle.a",
+      "toolchains/gnutls-ios/include",
+      "toolchains/gnutls-ios/lib/libgnutls.a",
+      "toolchains/gnutls-ios/lib/libgmp.a",
+      "toolchains/gnutls-ios/lib/libhogweed.a",
+      "toolchains/gnutls-ios/lib/libnettle.a"
+    ],
+    "clean": [
+      "toolchains/gnutls-ios",
+      "build/gnutls-ios/obj"
+    ]
+  },
+  "ffmpeg": {
+    "inputs": [
+      "build/ffmpeg"
+    ],
+    "outputs": [
+      "app/Madeira/libavformat.a",
+      "app/Madeira/libavcodec.a",
+      "app/Madeira/libswresample.a",
+      "app/Madeira/libavutil.a",
+      "toolchains/ffmpeg-ios/include"
+    ],
+    "clean": [
+      "build/ffmpeg/obj",
+      "toolchains/ffmpeg-ios"
+    ]
+  },
+  "freetype": {
+    "inputs": [
+      "build/freetype-ios"
+    ],
+    "external_revisions": {
+      "freetype": "42608f77f20749dd6ddc9e0536788eaad70ea4b5"
+    },
+    "outputs": [
+      "build/freetype-ios/build/libfreetype.a",
+      "toolchains/freetype-ios/include"
+    ],
+    "clean": [
+      "build/freetype-ios/build",
+      "toolchains/freetype-ios"
+    ]
+  },
+  "ntdll": {
+    "inputs": [
+      "build/ntdll-unix",
+      "build/crypto-unix",
+      "build/madsync"
+    ],
+    "exclude": [
+      "build/crypto-unix/gnutls_symtab_ios.c"
+    ],
+    "submodules": [
+      "wine"
+    ],
+    "dependencies": [
+      "wine-headers",
+      "crypto",
+      "ffmpeg",
+      "freetype"
+    ],
+    "outputs": [
+      "app/Madeira/libntdll_unix.a"
+    ],
+    "clean": [
+      "build/ntdll-unix/obj"
+    ]
+  },
+  "wineserver": {
+    "inputs": [
+      "build/wineserver",
+      "build/ntdll-unix/shims",
+      "build/madsync"
+    ],
+    "submodules": [
+      "wine"
+    ],
+    "dependencies": [
+      "wine-headers"
+    ],
+    "tools": [
+      "llvm-objcopy"
+    ],
+    "outputs": [
+      "app/Madeira/libwineserver.a"
+    ],
+    "clean": [
+      "build/wineserver/obj"
+    ]
+  },
+  "win32u": {
+    "inputs": [
+      "build/win32u-unix",
+      "build/ntdll-unix/shims",
+      "build/madsync"
+    ],
+    "submodules": [
+      "wine"
+    ],
+    "dependencies": [
+      "wine-headers",
+      "freetype"
+    ],
+    "outputs": [
+      "app/Madeira/libwin32u_unix.a"
+    ],
+    "clean": [
+      "build/win32u-unix/obj"
+    ]
+  },
+  "dxmt": {
+    "inputs": [
+      "build/dxmt-ios",
+      "build/llvm-ios",
+      "build/madeira-d3d12/deps.sh",
+      "app/Madeira/d3d12",
+      "madeira-d3d12/src",
+      "madeira-d3d12/tests/native/msc_canary.mm"
+    ],
+    "submodules": [
+      "dxmt"
+    ],
+    "external_revisions": {
+      "llvm": "8dfdcc7b7bf66834a761bd8de445840ef68e4d1a"
+    },
+    "outputs": [
+      "app/Madeira/libdxmt_combined.a"
+    ],
+    "clean": [
+      "build/dxmt-ios/obj",
+      "build/dxmt-ios/shader-headers",
+      "build/dxmt-ios/libdxmt_unix.a",
+      "build/dxmt-ios/libdxmt_combined.a",
+      "dxmt/src/dxmt/dxmt_command.h"
+    ]
+  },
+  "rppairing": {
+    "inputs": [
+      "build/rppairing-ios"
+    ],
+    "tools": [
+      "rustc"
+    ],
+    "outputs": [
+      "app/Madeira/libmadeira_rppairing.a",
+      "app/Madeira/legal/LICENSES-rppairing-crates.txt"
+    ],
+    "clean": [
+      "build/rppairing-ios/target"
+    ]
+  },
+  "dock": {
+    "inputs": [
+      "build/madeira-dock",
+      "build/codemagic/toolchains.sh"
+    ],
+    "submodules": [
+      "madeira-dock"
+    ],
+    "external_revisions": {
+      "llvm-mingw": "20260421-ucrt"
+    },
+    "outputs": [
+      "app/Madeira/arm64ec-windows/dockhost.exe",
+      "app/Madeira/arm64ec-windows/dock-notices.txt"
+    ],
+    "clean": [
+      "app/Madeira/arm64ec-windows/dockhost.exe",
+      "app/Madeira/arm64ec-windows/dock-notices.txt"
+    ],
+    "variables": [
+      "LLVM_MINGW"
+    ]
+  }
+}

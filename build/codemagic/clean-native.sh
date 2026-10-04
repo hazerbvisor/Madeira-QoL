@@ -10,7 +10,7 @@ for relative in json.loads(pathlib.Path('build/codemagic/native-libraries.json')
     pathlib.Path(relative).unlink(missing_ok=True)
 PY
 rm -rf FEX/build-ios toolchains/llvm-ios-build toolchains/llvm-host-build \
-    toolchains/gnutls-ios toolchains/ffmpeg-ios wine/build-macos \
+    toolchains/gnutls-ios toolchains/ffmpeg-ios toolchains/freetype-ios wine/build-macos \
     build/wineserver/obj build/dxmt-ios/obj build/dxmt-ios/shader-headers \
     build/ntdll-unix/obj build/win32u-unix/obj build/ffmpeg/obj \
     build/gnutls-ios/obj build/freetype-ios/build build/rppairing-ios/target

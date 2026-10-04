@@ -1,0 +1,32 @@
+{
+  "archives": {
+    "app/Madeira/libgnutls.a": "1d514008193616c017131714e74b585d8e09753c3681875a128db93cd2abaf7b",
+    "app/Madeira/libgmp.a": "f18cb8a43bc3c3d325ace81226805f93d95340ced2ddb31ce0fdae23c16d1d65",
+    "app/Madeira/libhogweed.a": "4d9fcff6ce96b6feb72d39602b5f499fb052cfba911993fb70d3be8bc0fdfca1",
+    "app/Madeira/libnettle.a": "6608d26cf9317940e90932f621536450c62218ac3c108aa0de003a1c3a9b9964"
+  },
+  "headers": {
+    "archive": "build/gnutls-ios/src/gnutls-3.8.9.tar.xz",
+    "sha256": "69e113d802d1670c4d5ac1b99040b1f2d5c7c05daec5003813c049b5184820ed",
+    "files": [
+      "abstract.h",
+      "compat.h",
+      "crypto.h",
+      "dtls.h",
+      "gnutls.h.in",
+      "gnutlsxx.h",
+      "ocsp.h",
+      "openpgp.h",
+      "pkcs11.h",
+      "pkcs12.h",
+      "pkcs7.h",
+      "self-test.h",
+      "socket.h",
+      "system-keys.h",
+      "tpm.h",
+      "urls.h",
+      "x509-ext.h",
+      "x509.h"
+    ]
+  }
+}
