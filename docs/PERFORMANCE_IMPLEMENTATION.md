@@ -127,3 +127,43 @@ policy produces bounded, gradual next-launch advice with sustained overload and
 headroom windows. It is explicitly not marketed as live DRS. Temporal remains
 disabled: no coherent motion vectors, depth, camera jitter or exposure/history
 are provided at the common presentation boundary.
+
+## Phase 4 — runtime manager and diagnostics
+
+A session-scoped manager samples once per second only while gameplay is active
+and the HUD or explicit Auto mode is enabled. The HUD has its own observable
+object. Opening UI, backgrounding, launching and disabling both features stop
+the timer and renderer timing callbacks. OS pressure/thermal notifications stay
+active for safety; hidden operation has no polling/log stream.
+
+Measurements: submission intervals (128-sample mean/p95/max), command-buffer GPU
+time when valid, process CPU time (100% means one core), process footprint,
+public available-memory estimate, thermal state and pipeline-creation timing.
+Pipeline creation is not reported as a count of shader compilations. Native
+submission rate is explicitly estimated; it includes renderer submissions, not
+proof of visible frames. Visible FPS requires valid drawable presentedTime;
+zero timestamps remain unavailable. Generated encode accounting is separate and
+zero without a real provider. CPU/FEX and GPU bottleneck classifications are
+estimates; no direct FEX translation-pressure signal exists here.
+
+Auto targets the chosen positive cap or conservative 30 FPS by default. Memory,
+serious thermal and Low Power Mode reduce a higher target to 30; sustained
+measured headroom is required for recovery, one supported cap at a time. The
+scale policy advises 3% steps after 3 seconds of GPU overload or 12 seconds of
+headroom, with a 5-second cooldown and user bounds. Advice is used at the next
+launch, never to resize live game render targets. Decisions are saved by existing
+per-game menu-close/session-finish persistence. Manual pacing disables Auto so
+it cannot silently override a user's choice. Compatibility settings are untouched.
+
+Optional pipeline record work is bounded (32 queued descriptors, 2,000 additions
+per session); archives are size checked at 256 MiB and writes use temp+rename.
+Pressure stops population and releases optional archive/scaler state on a worker.
+Ambient artwork has count/cost limits and pressure cleanup. No active game PSO,
+Wine allocation or executable FEX page is freed by this manager. Stale on-disk
+cache pruning excludes the active DXMT database; its writer still owns its size.
+
+Phase 4 app/helper release build passed (125.54 seconds). Production host tests
+cover sampling pause/disable, hidden pressure/cap handling, adaptive cooldowns,
+invalid/missing inputs, bounded advice, recovery gates, Auto profile persistence,
+and valid/corrupt SQLite cache fallback. Real pressure notifications, GPU timing,
+thermal behavior and visual HUD overhead require device validation.

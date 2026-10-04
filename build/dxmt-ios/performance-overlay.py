@@ -64,7 +64,7 @@ for name in ['_MTLDevice_newComputePipelineState', '_MTLDevice_newRenderPipeline
   MTLPipelineOption options =''')
     old = '  params->ret_error = (obj_handle_t)err;'
     assert function.count(old) == 1
-    function = function.replace(old, '''  madeira_performance_note_shader((CACurrentMediaTime() - madeira_compile_start) * 1000);
+    function = function.replace(old, '''  madeira_performance_note_pipeline((CACurrentMediaTime() - madeira_compile_start) * 1000);
   if (params->ret_pso && !err)
     madeira_pipeline_record((id<MTLDevice>)params->device, descriptor);
   params->ret_error = (obj_handle_t)err;''')

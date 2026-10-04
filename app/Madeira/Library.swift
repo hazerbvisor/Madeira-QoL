@@ -333,7 +333,7 @@ struct LibraryEntry: Codable, Identifiable {
             setenv("MADEIRA_FASTSYNC", fastSync == false ? "0" : mode, 1)
             setenv("MADEIRA_FASTSYNC_SEM", semaphoreFastPath == true ? "1" : "0", 1)
         }
-        madeira_set_vsync_locked(performanceUpgrade?.fpsCap == nil ? effectiveFPSMode : 0)
+        madeira_set_vsync_locked((performanceUpgrade?.initialFPSCap ?? -1) < 0 ? effectiveFPSMode : 0)
         fputs("[frontend] launch profile applied\n", stderr)
         LogStore.shared.log("[display-shape] resolution=\(resolution) mode=\(displayMode.rawValue)")
     }
@@ -341,8 +341,9 @@ struct LibraryEntry: Codable, Identifiable {
     /// What the bridge starts. Set on the main thread before the session begins.
     func configureLaunch() {
         let size = resolution.split(separator: "x").compactMap { Int($0) }
-        let fx = desktop != true && performanceUpgrade?.fxMode != nil && performanceUpgrade?.fxMode != .off
-        let spatial = madeira_spatial_configure(fx ? 1 : 0, Int32(size.first ?? 0), Int32(size.count == 2 ? size[1] : 0)) != 0
+        let validDisplay = size.count == 2 && (320...4096).contains(size[0]) && (240...4096).contains(size[1])
+        let fx = validDisplay && desktop != true && performanceUpgrade?.fxMode != nil && performanceUpgrade?.fxMode != .off
+        let spatial = madeira_spatial_configure(fx ? 1 : 0, validDisplay ? Int32(size[0]) : 0, validDisplay ? Int32(size[1]) : 0) != 0
         if spatial { setenv("DXMT_METALFX_SPATIAL_SWAPCHAIN", "0", 1) } // avoid two independent upscalers
         // "The game"'s identity and working folder for this launch only (the bridge
         // reads and clears them); every other launch starts without them.
@@ -382,9 +383,11 @@ final class LibraryModel: ObservableObject {
     @Published var current: UUID?
     @Published var activeEntry: LibraryEntry?
     @Published var menu = false {
-        didSet { if oldValue != menu { HardwareInput.shared.sessionFocusChanged() } }
+        didSet { if oldValue != menu { HardwareInput.shared.sessionFocusChanged(); PerformanceRuntime.shared.refresh() } }
     }
-    @Published var performance = false
+    @Published var performance = false {
+        didSet { if oldValue != performance { PerformanceRuntime.shared.refresh() } }
+    }
     @Published var liveLogs = false
     @Published var fpsMode = 1
     /// The session's controller mode (LibraryEntry.controllerMode): "keys" or nil.
@@ -409,7 +412,7 @@ final class LibraryModel: ObservableObject {
     @Published var error: String?
     @Published var sessionMessage = ""
     @Published var launching = false {
-        didSet { if oldValue != launching { HardwareInput.shared.sessionFocusChanged() } }
+        didSet { if oldValue != launching { HardwareInput.shared.sessionFocusChanged(); PerformanceRuntime.shared.refresh() } }
     }
     @Published var overlayFields = ["FPS", "Frame time", "RAM", "Battery"]
     private var launchPresent: UInt64 = 0
@@ -741,7 +744,7 @@ final class LibraryModel: ObservableObject {
         launchPresent = madeira_get_present_count(); launchStarted = Date(); launchSlow = false; launchLogs = entry.liveLogs
         launchSurface = winios_surface_present_count()
         MetalBackedView.presentCountAtLaunch = launchPresent; laidOutAfterFirstPresent = false
-        launching = true; overlayFields = entry.overlayFields ?? ["FPS", "Frame time", "RAM", "Battery"]
+        launching = true; overlayFields = entry.overlayFields ?? ["FPS", "Frame time", "RAM", "Graphics", "Pressure", "FPS cap"]
         displayMode = entry.displayMode
         activeEntry = entry; current = entry.id; menu = false; performance = entry.performance; liveLogs = entry.liveLogs
         LogStore.shared.setDisplayActive(entry.liveLogs)
@@ -767,6 +770,10 @@ final class LibraryModel: ObservableObject {
         MetalHostView.shared.isHidden = false
         ProMotionIntent.apply(mode: entry.effectiveFPSMode)
         ProMotionIntent.apply(cap: entry.performanceUpgrade?.fpsCap)
+        PerformanceRuntime.shared.begin(entry)
+        if let profile = entry.performanceUpgrade, profile.automaticPerformance {
+            ProMotionIntent.apply(cap: profile.initialFPSCap)
+        }
         HardwareInput.shared.configureSession(entry.performanceUpgrade)
         if remember { var played = entry; played.lastPlayed = Date(); save(played) }
         launchDismissLogged = false
@@ -850,9 +857,10 @@ final class LibraryModel: ObservableObject {
 
     func setFPS(_ mode: Int) {
         if var profile = activeEntry?.performanceUpgrade {
-            profile.fpsCap = nil; activeEntry?.performanceUpgrade = profile
+            profile.fpsCap = nil; profile.automaticPerformance = false; activeEntry?.performanceUpgrade = profile
         }
         madeira_performance_set_cap(-1)
+        PerformanceRuntime.shared.manualPacingSelected()
         fpsMode = mode
         let applied: Int32 = mode == 3 && !ProMotionIntent.has30Cap ? 1 : Int32(mode)
         madeira_set_vsync_locked(applied)
@@ -901,6 +909,7 @@ final class LibraryModel: ObservableObject {
         timer?.invalidate(); timer = nil
         saveCurrentProfile()
         controllerMode = nil
+        PerformanceRuntime.shared.stop()
         controllerBinds = [:]
         padMouseVertical = 1
         let controls = TouchControlsModel.shared
@@ -1663,7 +1672,12 @@ private struct AmbientGlowCard: View {
 /// the full artwork.
 @MainActor
 enum AmbientArtwork {
-    private static let cache = NSCache<NSString, UIImage>()
+    private static let cache: NSCache<NSString, UIImage> = {
+        let value = NSCache<NSString, UIImage>()
+        value.countLimit = 64; value.totalCostLimit = 4 * 1024 * 1024
+        return value
+    }()
+    static func clear() { cache.removeAllObjects() }
 
     static func cached(_ id: String) -> UIImage? { cache.object(forKey: id as NSString) }
 
@@ -1684,11 +1698,12 @@ enum AmbientArtwork {
             }
         }
         guard let image, image.size.width > 0 else { return nil }
-        let size = CGSize(width: 96, height: (96 * image.size.height / image.size.width).rounded())
+        let ratio = min(96 / image.size.width, 384 / max(image.size.height, 1))
+        let size = CGSize(width: max(1, (image.size.width * ratio).rounded()), height: max(1, (image.size.height * ratio).rounded()))
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         let small = UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
-        cache.setObject(small, forKey: item.id as NSString)
+        cache.setObject(small, forKey: item.id as NSString, cost: Int(size.width * size.height) * 4)
         return small
     }
 
@@ -3298,7 +3313,7 @@ struct LibraryHUD: View {
                 Divider()
                 Toggle("Performance overlay", isOn: $model.performance)
                 if model.performance {
-                    ForEach(["FPS", "Frame time", "RAM", "Battery"], id: \.self) { field in
+                    ForEach(["FPS", "Frame time", "RAM", "Battery", "Graphics", "CPU/GPU", "Pressure", "FPS cap"], id: \.self) { field in
                         Toggle(field, isOn: Binding(get: { model.overlayFields.contains(field) }, set: { on in
                             model.overlayFields.removeAll { $0 == field }; if on { model.overlayFields.append(field) }
                         })).font(.subheadline)
@@ -3338,39 +3353,6 @@ struct LibraryLiveLogs: View {
             }.defaultScrollAnchor(.bottom).padding(8)
         }.background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.white)
             .accessibilityLabel("Live diagnostic log")
-    }
-}
-
-struct LibraryMetrics: View {
-    @ObservedObject private var model = LibraryModel.shared
-    @State private var lastCount: UInt64 = 0
-    @State private var lastTime = Date()
-    @State private var fps = 0.0
-    @State private var memory = 0
-    @State private var battery = -1
-    private let ticks = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    var body: some View {
-        Text(parts.joined(separator: "  ·  "))
-            .font(.caption.monospacedDigit().weight(.medium)).padding(.horizontal, 12).padding(.vertical, 8)
-            .background(.black.opacity(0.8), in: Capsule()).foregroundStyle(.white)
-            .onAppear { lastCount = madeira_get_present_count(); lastTime = Date(); UIDevice.current.isBatteryMonitoringEnabled = true }
-            .onDisappear { UIDevice.current.isBatteryMonitoringEnabled = false }
-            .onReceive(ticks) { now in
-                let count = madeira_get_present_count(); let dt = now.timeIntervalSince(lastTime)
-                fps = count >= lastCount ? Double(count - lastCount) / max(0.001, dt) : 0; lastCount = count; lastTime = now
-                var info = task_vm_info_data_t(); var size = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
-                let result = withUnsafeMutablePointer(to: &info) { $0.withMemoryRebound(to: integer_t.self, capacity: Int(size)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &size) } }
-                if result == KERN_SUCCESS { memory = Int(info.phys_footprint / 1048576) }
-                battery = UIDevice.current.batteryLevel < 0 ? -1 : Int(UIDevice.current.batteryLevel * 100)
-            }
-    }
-    private var parts: [String] {
-        var result: [String] = []
-        if model.overlayFields.contains("FPS") { result.append(String(format: "%.0f FPS", fps)) }
-        if model.overlayFields.contains("Frame time") { result.append(fps > 0 ? String(format: "%.1f ms avg", 1000 / fps) : "— ms") }
-        if model.overlayFields.contains("RAM") { result.append("\(memory) MB") }
-        if model.overlayFields.contains("Battery"), battery >= 0 { result.append("\(battery)%") }
-        return result
     }
 }
 

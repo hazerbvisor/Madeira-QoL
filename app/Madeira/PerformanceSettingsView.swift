@@ -10,6 +10,8 @@ struct PerformanceProfileSettings: View {
     }
     var body: some View {
         Section("Frame delivery") {
+            Toggle("Auto performance", isOn: profile.automaticPerformance)
+                .disabled(madeira_performance_renderer_available() == 0)
             Picker("Precise FPS cap", selection: Binding(get: { profile.wrappedValue.fpsCap ?? -1 }, set: {
                 var value = profile.wrappedValue; value.fpsCap = $0 < 0 ? nil : $0; profile.wrappedValue = value
             })) {
@@ -20,6 +22,11 @@ struct PerformanceProfileSettings: View {
             }.disabled(madeira_performance_renderer_available() == 0)
             Text("Uses absolute frame deadlines and respects slower game-requested pacing. Display refresh and thermal limits may reduce visible FPS.")
                 .font(.caption).foregroundStyle(.secondary)
+            if profile.wrappedValue.automaticPerformance {
+                Text("Auto targets the selected cap, or 30 FPS when no fixed cap is selected. It reduces to 30 under memory, thermal or power pressure and recovers gradually only with measured GPU headroom.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let decision = profile.wrappedValue.lastAutoDecision { Text(decision).font(.caption) }
+            }
         }
         Section("Fullscreen and mouse") {
             Toggle("Fullscreen presentation", isOn: profile.fullscreen)
@@ -52,16 +59,29 @@ struct MadeiraFXSettings: View {
     var body: some View {
         Section("MadeiraFX") {
             Picker("Spatial preset", selection: Binding(get: { profile.fxMode }, set: {
-                profile.fxMode = $0; profile.renderScale = $0.recommendedScale; profile.normalize()
+                profile.fxMode = $0; profile.renderScale = $0.recommendedScale; profile.nextLaunchScale = nil; profile.normalize()
             })) {
                 ForEach(MadeiraFXMode.allCases, id: \.self) { Text($0.label).tag($0) }
             }.disabled(!supported)
             if supported && profile.fxMode != .off {
-                Slider(value: $profile.renderScale, in: profile.minimumScale...profile.maximumScale) { Text("Internal render scale") }
+                if profile.minimumScale < profile.maximumScale {
+                    Slider(value: Binding(get: { profile.renderScale }, set: { profile.renderScale = $0; profile.nextLaunchScale = nil }), in: profile.minimumScale...profile.maximumScale) { Text("Internal render scale") }
+                }
                 Text("Requested internal: \(internalResolution) · Output target: \(outputResolution.replacingOccurrences(of: "x", with: "×")) · \(Int(profile.renderScale * 100))%")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("The game must honor the lower session resolution. Actual dimensions and active upscaling appear in diagnostics. Changes apply at the next launch.")
                     .font(.caption).foregroundStyle(.secondary)
+                if profile.automaticPerformance {
+                    Slider(value: Binding(get: { profile.minimumScale }, set: { profile.minimumScale = $0; profile.normalize() }), in: 0.5...1) { Text("Minimum recommended scale") }
+                    if profile.minimumScale < 1 {
+                        Slider(value: Binding(get: { profile.maximumScale }, set: { profile.maximumScale = $0; profile.normalize() }), in: profile.minimumScale...1) { Text("Maximum recommended scale") }
+                    }
+                    Text("Next-launch recommendation range: \(Int(profile.minimumScale * 100))–\(Int(profile.maximumScale * 100))%")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let scale = profile.nextLaunchScale {
+                        Text("Next launch: \(Int((scale * 100).rounded()))% · Current game resources are unchanged.").font(.caption)
+                    }
+                }
             } else if !supported {
                 Text("MetalFX Spatial is unavailable for this device or desktop session. Original rendering and resolution are retained.")
                     .font(.caption).foregroundStyle(.secondary)

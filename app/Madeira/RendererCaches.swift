@@ -48,17 +48,19 @@ enum RendererCaches {
                 // add persistence without calling MTLSetShaderCachePath (private).
                 setenv("DXMT_USE_DEFAULT_METAL_CACHE", "1", 1)
                 let profile = entry.performanceUpgrade ?? PerformanceProfile()
-                madeira_performance_configure(Int32(profile.fpsCap ?? -1), entry.performance || profile.automaticPerformance ? 1 : 0,
+                madeira_performance_configure(Int32(profile.initialFPSCap), 0,
                                                path.appendingPathComponent("pipelines.metalarc").path)
                 prune(excluding: path)
             } catch {
                 // Disk pressure, sandbox denial and missing executables must not
                 // prevent launch. The shader compiler remains the fallback.
                 setenv("DXMT_IOS_CACHE_DIR", "1", 1)
-                madeira_performance_configure(Int32(entry.performanceUpgrade?.fpsCap ?? -1), entry.performance ? 1 : 0, nil)
+                let profile = entry.performanceUpgrade ?? PerformanceProfile()
+                madeira_performance_configure(Int32(profile.initialFPSCap), 0, nil)
                 fputs("[cache] persistent renderer cache unavailable: \(error.localizedDescription)\n", stderr)
             }
         }
+        DispatchQueue.main.async { PerformanceRuntime.shared.refresh() }
     }
     static func finish() { queue.async { sessionActive = false } }
 

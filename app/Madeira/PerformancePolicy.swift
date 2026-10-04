@@ -36,6 +36,9 @@ struct PerformanceProfile: Codable, Equatable {
     var mouseCapture: MouseCaptureBehavior = .automatic
     var mouseSensitivity: Double?
     var interpolation: FrameInterpolationMode = .off
+    var nextLaunchScale: Double?
+    var lastAutoFPS: Int?
+    var lastAutoDecision: String?
 
     static let fpsCaps = [30, 40, 60, 90, 120, 0]
 
@@ -43,6 +46,7 @@ struct PerformanceProfile: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case fpsCap, fxMode, renderScale, dynamicResolution, minimumScale, maximumScale
         case automaticPerformance, fullscreen, mouseCapture, mouseSensitivity, interpolation
+        case nextLaunchScale, lastAutoFPS, lastAutoDecision
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -58,19 +62,35 @@ struct PerformanceProfile: Codable, Equatable {
         mouseCapture = (try? c.decode(MouseCaptureBehavior.self, forKey: .mouseCapture)) ?? .automatic
         mouseSensitivity = try? c.decode(Double.self, forKey: .mouseSensitivity)
         interpolation = (try? c.decode(FrameInterpolationMode.self, forKey: .interpolation)) ?? .off
+        nextLaunchScale = try? c.decode(Double.self, forKey: .nextLaunchScale)
+        lastAutoFPS = try? c.decode(Int.self, forKey: .lastAutoFPS)
+        lastAutoDecision = try? c.decode(String.self, forKey: .lastAutoDecision)
         normalize()
     }
     mutating func normalize() {
         if let cap = fpsCap, !Self.fpsCaps.contains(cap) { fpsCap = nil }
         minimumScale = minimumScale.isFinite ? min(max(minimumScale, 0.5), 1) : 0.5
         maximumScale = maximumScale.isFinite ? min(max(maximumScale, minimumScale), 1) : 1
-        renderScale = renderScale.isFinite ? min(max(renderScale, minimumScale), maximumScale) : 1
+        renderScale = renderScale.isFinite ? min(max(renderScale, minimumScale), maximumScale) : maximumScale
         if let sensitivity = mouseSensitivity {
             mouseSensitivity = sensitivity.isFinite ? min(max(sensitivity, 0.1), 8) : nil
         }
+        if let scale = nextLaunchScale {
+            nextLaunchScale = scale.isFinite ? min(max(scale, minimumScale), maximumScale) : nil
+        }
+        if let cap = lastAutoFPS, !Self.fpsCaps.contains(cap) || cap == 0 { lastAutoFPS = nil }
+        if let decision = lastAutoDecision { lastAutoDecision = String(decision.prefix(240)) }
     }
+    var autoRequestedFPS: Int { fpsCap.flatMap { $0 > 0 ? $0 : nil } ?? 30 }
+    var initialFPSCap: Int {
+        automaticPerformance ? min(lastAutoFPS ?? autoRequestedFPS, autoRequestedFPS) : (fpsCap ?? -1)
+    }
+    var requestedRenderScale: Double { automaticPerformance ? (nextLaunchScale ?? renderScale) : renderScale }
     func internalResolution(outputWidth: Int, outputHeight: Int) -> (width: Int, height: Int) {
-        let scale = fxMode == .off ? 1 : renderScale
+        guard (1...8192).contains(outputWidth), (1...8192).contains(outputHeight) else {
+            return (outputWidth, outputHeight) // invalid external profile; avoid an overflowing conversion
+        }
+        let scale = fxMode == .off ? 1 : requestedRenderScale
         return (max(320, Int((Double(outputWidth) * scale).rounded())),
                 max(240, Int((Double(outputHeight) * scale).rounded())))
     }

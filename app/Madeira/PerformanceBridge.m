@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <mach/mach_time.h>
 #include <stdlib.h>
+#include <os/proc.h>
 #import <MetalFX/MetalFX.h>
 
 static _Atomic int cap = -1, telemetry, connected;
@@ -17,6 +18,10 @@ static NSString *archivePath;
 static id<MTLBinaryArchive> pipelineArchive;
 static uint64_t archiveGeneration;
 static BOOL archiveDirty, saveScheduled;
+static BOOL archiveAttempted;
+static unsigned archiveRecords;
+static _Atomic unsigned pendingArchiveRecords;
+static _Atomic int cachePressure;
 static _Atomic int spatialEnabled, outputWidth, outputHeight;
 static pthread_mutex_t spatialLock = PTHREAD_MUTEX_INITIALIZER;
 static id<MTLFXSpatialScaler> spatialScaler;
@@ -53,7 +58,7 @@ int madeira_spatial_encode(uintptr_t command, uintptr_t inputHandle, uintptr_t o
     id<MTLTexture> input = (__bridge id<MTLTexture>)(void *)inputHandle;
     id<MTLTexture> output = (__bridge id<MTLTexture>)(void *)outputHandle;
     BOOL encoded = NO;
-    if (atomic_load(&spatialEnabled) && compatible && input && output &&
+    if (atomic_load(&spatialEnabled) && !atomic_load(&cachePressure) && compatible && input && output &&
         input.width < output.width && input.height < output.height &&
         input.sampleCount == 1 && output.sampleCount == 1 &&
         input.textureType == MTLTextureType2D && output.textureType == MTLTextureType2D) {
@@ -83,6 +88,7 @@ int madeira_spatial_encode(uintptr_t command, uintptr_t inputHandle, uintptr_t o
         }
         pthread_mutex_unlock(&spatialLock);
     }
+    if (!atomic_load(&telemetry)) return encoded;
     pthread_mutex_lock(&samplesLock);
     metrics.internal_width = (int)input.width; metrics.internal_height = (int)input.height;
     metrics.output_width = (int)output.width; metrics.output_height = (int)output.height;
@@ -103,7 +109,34 @@ int madeira_performance_renderer_available(void) {
     return atomic_load(&connected) || madeira_dxmt_performance_hooks_v1();
 }
 void madeira_performance_set_cap(int value) { atomic_store(&cap, value); }
-void madeira_performance_set_telemetry(int enabled) { atomic_store(&telemetry, !!enabled); }
+void madeira_performance_set_telemetry(int enabled) {
+    int wasEnabled = atomic_exchange(&telemetry, !!enabled);
+    if (enabled && !wasEnabled) {
+        pthread_mutex_lock(&samplesLock);
+        lastSubmit = lastStallLog = 0; cursor = sampleCount = 0;
+        pthread_mutex_unlock(&samplesLock);
+    }
+}
+
+uint64_t madeira_available_memory(void) { return os_proc_available_memory(); }
+
+void madeira_performance_cache_pressure(int level) {
+    level = MAX(0, MIN(level, 2));
+    atomic_store(&cachePressure, level);
+    dispatch_async(cacheQueue(), ^{
+        // Only optional renderer-owned state is released. Live game resources,
+        // pipeline states and executable FEX pages remain owned by their runtime.
+        pthread_mutex_lock(&spatialLock);
+        if (level) spatialScaler = nil;
+        pthread_mutex_unlock(&spatialLock);
+        pthread_mutex_lock(&archiveLock);
+        if (level >= 2) {
+            pipelineArchive = nil; archiveGeneration++;
+            archiveDirty = saveScheduled = NO; archiveAttempted = NO;
+        }
+        pthread_mutex_unlock(&archiveLock);
+    });
+}
 
 void madeira_performance_configure(int value, int enabled, const char *path) {
     madeira_performance_set_cap(value);
@@ -118,7 +151,7 @@ void madeira_performance_configure(int value, int enabled, const char *path) {
         archivePath = newPath;
         pipelineArchive = nil;
         archiveGeneration++;
-        archiveDirty = saveScheduled = NO;
+        archiveDirty = saveScheduled = archiveAttempted = NO; archiveRecords = 0;
         pthread_mutex_unlock(&archiveLock);
     });
 }
@@ -146,11 +179,18 @@ void madeira_performance_snapshot(MadeiraPerformanceSnapshot *out) {
     }
 }
 
-void madeira_performance_note_shader(double ms) {
+void madeira_performance_note_pipeline(double ms) {
     if (!atomic_load(&telemetry)) return;
     pthread_mutex_lock(&samplesLock);
-    metrics.shader_compiles++;
-    metrics.shader_ms = ms;
+    metrics.pipeline_requests++;
+    metrics.pipeline_ms = ms;
+    pthread_mutex_unlock(&samplesLock);
+}
+
+void madeira_performance_note_generated_encode(void) {
+    if (!atomic_load(&telemetry)) return;
+    pthread_mutex_lock(&samplesLock);
+    metrics.generated_encoded_frames++;
     pthread_mutex_unlock(&samplesLock);
 }
 
@@ -212,9 +252,13 @@ BOOL madeira_performance_present(id<MTLCommandBuffer> buffer,
 }
 
 static void ensureArchive(id<MTLDevice> device) {
-    if (pipelineArchive || !archivePath.length) return;
+    if (pipelineArchive || archiveAttempted || !archivePath.length || atomic_load(&cachePressure)) return;
+    archiveAttempted = YES;
     MTLBinaryArchiveDescriptor *desc = [MTLBinaryArchiveDescriptor new];
-    if ([[NSFileManager defaultManager] fileExistsAtPath:archivePath])
+    NSDictionary *existing = [[NSFileManager defaultManager] attributesOfItemAtPath:archivePath error:nil];
+    if ([existing fileSize] > 256 * 1024 * 1024)
+        [[NSFileManager defaultManager] removeItemAtPath:archivePath error:nil];
+    else if ([[NSFileManager defaultManager] fileExistsAtPath:archivePath])
         desc.url = [NSURL fileURLWithPath:archivePath];
     NSError *error = nil;
     pipelineArchive = [device newBinaryArchiveWithDescriptor:desc error:&error];
@@ -230,7 +274,7 @@ void madeira_pipeline_attach(id<MTLDevice> device, id descriptor) {
     // First initialization is on the launch/compilation worker. Afterwards
     // a short lock reads the archive; it never waits for disk serialization.
     pthread_mutex_lock(&archiveLock);
-    BOOL needsInitialization = archivePath.length && !pipelineArchive;
+    BOOL needsInitialization = archivePath.length && !pipelineArchive && !archiveAttempted && !atomic_load(&cachePressure);
     pthread_mutex_unlock(&archiveLock);
     if (needsInitialization) {
     dispatch_sync(cacheQueue(), ^{
@@ -253,7 +297,7 @@ static void scheduleArchiveSave(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), cacheQueue(), ^{
         if (generation != archiveGeneration) return;
         saveScheduled = NO;
-        if (!archiveDirty || !archivePath.length) return;
+        if (!archiveDirty || !archivePath.length || atomic_load(&cachePressure)) return;
         NSString *temporary = [archivePath stringByAppendingString:@".tmp"];
         NSError *error = nil;
         if ([pipelineArchive serializeToURL:[NSURL fileURLWithPath:temporary] error:&error]) {
@@ -261,6 +305,12 @@ static void scheduleArchiveSave(void) {
             if ([attributes fileSize] <= 256 * 1024 * 1024) {
                 if (rename(temporary.fileSystemRepresentation, archivePath.fileSystemRepresentation) == 0)
                     archiveDirty = NO;
+            } else {
+                // Stop optional population rather than retaining an oversized
+                // archive indefinitely. Existing compiled PSOs are unaffected.
+                pthread_mutex_lock(&archiveLock);
+                pipelineArchive = nil; archiveGeneration++; archiveDirty = NO;
+                pthread_mutex_unlock(&archiveLock);
             }
             [[NSFileManager defaultManager] removeItemAtPath:temporary error:nil];
         }
@@ -272,11 +322,15 @@ void madeira_pipeline_record(id<MTLDevice> device, id descriptor) {
     BOOL enabled = archivePath.length > 0;
     uint64_t generation = archiveGeneration;
     pthread_mutex_unlock(&archiveLock);
-    if (!enabled) return;
+    if (!enabled || atomic_load(&cachePressure)) return;
+    if (atomic_fetch_add(&pendingArchiveRecords, 1) >= 32) {
+        atomic_fetch_sub(&pendingArchiveRecords, 1); return;
+    }
     id copy = [descriptor copy];
     // Keep expensive archive maintenance off the UI and renderer threads.
     dispatch_async(cacheQueue(), ^{
-        if (generation != archiveGeneration) return;
+        atomic_fetch_sub(&pendingArchiveRecords, 1);
+        if (generation != archiveGeneration || atomic_load(&cachePressure) || archiveRecords >= 2000) return;
         pthread_mutex_lock(&archiveLock);
         ensureArchive(device);
         pthread_mutex_unlock(&archiveLock);
@@ -286,6 +340,6 @@ void madeira_pipeline_record(id<MTLDevice> device, id descriptor) {
             success = [pipelineArchive addRenderPipelineFunctionsWithDescriptor:copy error:&error];
         else if ([copy isKindOfClass:[MTLComputePipelineDescriptor class]])
             success = [pipelineArchive addComputePipelineFunctionsWithDescriptor:copy error:&error];
-        if (success) { archiveDirty = YES; scheduleArchiveSave(); }
+        if (success) { archiveRecords++; archiveDirty = YES; scheduleArchiveSave(); }
     });
 }

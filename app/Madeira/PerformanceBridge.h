@@ -6,8 +6,8 @@
 extern "C" {
 #endif
 typedef struct {
-    uint64_t native_frames, presented_frames, stalls, shader_compiles;
-    double mean_ms, p95_ms, max_ms, gpu_ms, shader_ms;
+    uint64_t native_frames, presented_frames, stalls, pipeline_requests, generated_encoded_frames;
+    double mean_ms, p95_ms, max_ms, gpu_ms, pipeline_ms;
     int gpu_valid, presented_valid, internal_width, internal_height;
     int output_width, output_height, spatial_active, effective_cap;
 } MadeiraPerformanceSnapshot;
@@ -17,7 +17,10 @@ void madeira_performance_configure(int cap, int telemetry, const char *archive_p
 void madeira_performance_snapshot(MadeiraPerformanceSnapshot *snapshot);
 void madeira_performance_set_cap(int cap);
 void madeira_performance_set_telemetry(int enabled);
-void madeira_performance_note_shader(double elapsed_ms);
+void madeira_performance_cache_pressure(int level);
+uint64_t madeira_available_memory(void);
+void madeira_performance_note_pipeline(double elapsed_ms);
+void madeira_performance_note_generated_encode(void);
 int madeira_performance_renderer_available(void);
 int madeira_spatial_supported(void);
 int madeira_spatial_configure(int enabled, int width, int height);

@@ -137,6 +137,9 @@
 		B90000000000000000000203 /* PerformancePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000103 /* PerformancePolicy.swift */; };
 		B90000000000000000000204 /* RendererCaches.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000104 /* RendererCaches.swift */; };
 		B90000000000000000000205 /* PerformanceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000105 /* PerformanceSettingsView.swift */; };
+		B90000000000000000000206 /* AdaptivePerformancePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000106 /* AdaptivePerformancePolicy.swift */; };
+		B90000000000000000000207 /* PerformanceRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000107 /* PerformanceRuntime.swift */; };
+		B90000000000000000000208 /* PerformanceHUD.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90000000000000000000108 /* PerformanceHUD.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -321,6 +324,9 @@
 		B90000000000000000000103 /* PerformancePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformancePolicy.swift; sourceTree = "<group>"; };
 		B90000000000000000000104 /* RendererCaches.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererCaches.swift; sourceTree = "<group>"; };
 		B90000000000000000000105 /* PerformanceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceSettingsView.swift; sourceTree = "<group>"; };
+		B90000000000000000000106 /* AdaptivePerformancePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptivePerformancePolicy.swift; sourceTree = "<group>"; };
+		B90000000000000000000107 /* PerformanceRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceRuntime.swift; sourceTree = "<group>"; };
+		B90000000000000000000108 /* PerformanceHUD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceHUD.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -453,6 +459,9 @@
 				A2000202 /* FPSOverlay.swift */,
 				A2000400 /* Library.swift */,
 				A2000401 /* GuestDisplay.swift */,
+				B90000000000000000000106 /* AdaptivePerformancePolicy.swift */,
+				B90000000000000000000107 /* PerformanceRuntime.swift */,
+				B90000000000000000000108 /* PerformanceHUD.swift */,
 				B90000000000000000000105 /* PerformanceSettingsView.swift */,
 				B90000000000000000000104 /* RendererCaches.swift */,
 				B90000000000000000000103 /* PerformancePolicy.swift */,
@@ -762,6 +771,9 @@
 				A1000202 /* FPSOverlay.swift in Sources */,
 				A1000400 /* Library.swift in Sources */,
 				A1000401 /* GuestDisplay.swift in Sources */,
+				B90000000000000000000206 /* AdaptivePerformancePolicy.swift in Sources */,
+				B90000000000000000000207 /* PerformanceRuntime.swift in Sources */,
+				B90000000000000000000208 /* PerformanceHUD.swift in Sources */,
 				B90000000000000000000205 /* PerformanceSettingsView.swift in Sources */,
 				B90000000000000000000204 /* RendererCaches.swift in Sources */,
 				B90000000000000000000203 /* PerformancePolicy.swift in Sources */,

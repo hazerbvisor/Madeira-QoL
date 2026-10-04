@@ -59,6 +59,19 @@ for cap in PerformanceProfile.fpsCaps {
 var malformed = PerformanceProfile(); malformed.renderScale = .infinity; malformed.mouseSensitivity = .nan
 malformed.normalize()
 assert(malformed.renderScale == 1 && malformed.mouseSensitivity == nil)
+malformed.maximumScale = 0.7; malformed.renderScale = .nan; malformed.normalize()
+assert(malformed.renderScale == 0.7)
+var auto = PerformanceProfile(); auto.automaticPerformance = true; auto.fpsCap = 60
+auto.lastAutoFPS = 30; auto.fxMode = .auto; auto.nextLaunchScale = 0.67
+auto.lastAutoDecision = "Conservative next-launch advice"
+let savedAuto = try decoder.decode(PerformanceProfile.self, from: encoder.encode(auto))
+assert(savedAuto == auto && savedAuto.initialFPSCap == 30)
+let nextSize = savedAuto.internalResolution(outputWidth: 1280, outputHeight: 960)
+assert(nextSize.width == 858 && nextSize.height == 643)
+auto.automaticPerformance = false
+assert(auto.initialFPSCap == 60 && auto.requestedRenderScale == 1)
+let huge = auto.internalResolution(outputWidth: Int.max, outputHeight: Int.max)
+assert(huge.width == Int.max && huge.height == Int.max)
 // An absent upgrade field must leave a legacy library profile unchanged.
 struct LegacyEnvelope: Codable { var fpsMode: Int; var performanceUpgrade: PerformanceProfile? }
 let legacy = try decoder.decode(LegacyEnvelope.self, from: Data("{\"fpsMode\":3}".utf8))

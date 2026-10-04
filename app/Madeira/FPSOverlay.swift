@@ -124,11 +124,7 @@ struct FPSOverlay: View {
     /// ml606: live phys_footprint in MB, refreshed on the 250ms display tick.
     @State private var memMB: Int = 0
 
-    /// iOS jetsams this app at EXACTLY 4096MB of phys_footprint (memory:
-    /// "Jetsam = EXACTLY 4096MB"). task_info(TASK_VM_INFO) reports the very
-    /// same counter the kernel judges us on, so this is the real number and
-    /// not an approximation from resident size.
-    private static let jetsamLimitMB = 4096
+    @State private var availableMB = 0
 
     private func readFootprintMB() -> Int {
         var info = task_vm_info_data_t()
@@ -145,7 +141,7 @@ struct FPSOverlay: View {
     /// Headroom-based, because the absolute number means nothing without the
     /// ceiling: green >768MB free, yellow >384MB, orange >128MB, red below.
     private var memColor: Color {
-        let free = Self.jetsamLimitMB - memMB
+        let free = availableMB
         if memMB == 0 { return .secondary }
         if free > 768 { return .green }
         if free > 384 { return .yellow }
@@ -170,10 +166,8 @@ struct FPSOverlay: View {
                 .cornerRadius(6)
             } else if visible {
                 HStack(spacing: 8) {
-                    // ml606: live phys_footprint — the SAME number jetsam kills on.
-                    // ml605 died at 4080MB against a 4096MB limit with no warning
-                    // of any kind in the log, so having it on screen turns "it
-                    // vanished" into "we watched it climb".
+                    // Public process footprint and available-memory headroom.
+                    // The OS limit varies by device and entitlement.
                     Text("\(memMB)MB")
                         .foregroundColor(memColor)
                         .frame(width: 56, alignment: .trailing)
@@ -354,12 +348,12 @@ struct FPSOverlay: View {
         }
 
         // 250ms display refresh — computes adaptive-window FPS
-        memMB = readFootprintMB()
+        memMB = readFootprintMB(); availableMB = Int(madeira_available_memory() / 1_048_576)
         displayTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in
             fps = computeAdaptiveFPS()
             // ml606: piggybacks on the existing tick, so it costs one extra
             // task_info per 250ms and no additional SwiftUI invalidation.
-            memMB = readFootprintMB()
+            memMB = readFootprintMB(); availableMB = Int(madeira_available_memory() / 1_048_576)
         }
     }
 
