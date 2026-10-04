@@ -11,13 +11,25 @@ Use Codemagic's Apple Silicon `mac_mini_m2` runner with its latest Xcode and
 Metal Toolchain component. The workflow installs Homebrew build tools and the
 Rust iOS target. Enable this repository in Codemagic and select the workflow.
 
-Supply the twelve unmodified Microsoft runtime DLLs listed in
-[tools/fetch-vcruntime.md](../tools/fetch-vcruntime.md). Set either:
+The twelve Microsoft runtime DLLs listed in
+[tools/fetch-vcruntime.md](../tools/fetch-vcruntime.md) bootstrap automatically from
+Microsoft's official Visual C++ 2015–2022 x64 redistributable **14.44.35211**.
+`tools/vcruntime-pins.json` records the immutable download URL, installer SHA-256,
+and every staged DLL's SHA-256. `tools/fetch-vcruntime.py` extracts its WiX Burn
+cabinets without executing the installer, selects the x64 runtime payload from
+the manifest, checks all twelve DLLs, and copies their bytes unchanged. The cached
+installer is verified again on every extraction. No private ZIP is needed by default.
+
+Existing private provisioning remains supported. Set either:
 
 - `MADEIRA_VCRUNTIME_DIR`: an existing directory on a privately provisioned runner;
 - `MADEIRA_VCRUNTIME_URL` and `MADEIRA_VCRUNTIME_SHA256`: a private downloadable
   ZIP containing those DLLs at its root, and its SHA-256 checksum. Store the URL
   as a secure Codemagic environment variable, especially if it carries credentials.
+
+Explicit overrides are validated as x64 PE DLLs with intact Authenticode payloads;
+they do not fall back to a public download if incomplete. Automatic downloads must
+also match the pinned per-DLL hashes. Neither installer nor DLLs are committed.
 
 Do not upload a Madeira IPA as an input. The runtime directory is a distinct
 Microsoft dependency. These DLLs are ignored by Git and are copied unchanged.
@@ -85,7 +97,7 @@ removed Xcode references also require updating the inventory.
 
 ## Clean verification
 
-On macOS, after provisioning runtime inputs:
+On macOS, with Xcode and the workflow build tools installed:
 
 ```sh
 git submodule update --init --recursive
@@ -103,7 +115,10 @@ Use an empty Codemagic cache for the first validation run; subsequent normal run
 can reuse LLVM products. Native output deletion never alters source submodules.
 
 Validation status: recursive checkout and the actual llvm-mingw download/checksum
-were verified in Linux. Archive audit, missing-input detection and shell syntax
+were verified in Linux. Automatic Microsoft runtime download/extraction was also
+executed with an empty download cache and output directory: all twelve DLLs matched
+the pinned hashes and retained their x64 architecture and certificate payloads.
+Archive audit, missing-input detection and shell syntax
 can also be verified there. A full macOS native build, Xcode link, and IPA packaging
 have **not** been executed for this change. This workflow is an unverified build
 candidate until a Codemagic run completes; it must not be presented as a successful

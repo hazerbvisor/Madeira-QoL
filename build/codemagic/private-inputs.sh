@@ -1,5 +1,5 @@
 #!/bin/bash
-# Inputs are supplied by the runner, never committed or recovered from an IPA.
+# Fetch/provision external inputs; never commit them or recover from an IPA.
 set -euo pipefail
 R="$(cd "$(dirname "$0")/../.." && pwd)"
 # Full D3D12 is the only CI mode. The pinned, already tracked converter is
@@ -9,8 +9,8 @@ if [ -n "${MADEIRA_MSC_IOS_FILE:-}" ]; then
         cp "$MADEIRA_MSC_IOS_FILE" "$R/app/Madeira/d3d12/libmetalirconverter.dylib"
 fi
 source "$R/build/madeira-d3d12/deps.sh"
-# Existing Microsoft DLL resources must be present to preserve guest behavior.
-# Supply a directory on the runner or a private ZIP with DLLs at its root.
+# Preserve explicit runner inputs; otherwise bootstrap from Microsoft's pinned
+# redistributable instead of requiring a previous build or a private ZIP.
 DEST="$R/app/Madeira/x86_64-vcruntime"
 mkdir -p "$DEST"
 if [ -n "${MADEIRA_VCRUNTIME_DIR:-}" ]; then
@@ -23,9 +23,7 @@ elif [ -n "${MADEIRA_VCRUNTIME_URL:-}" ]; then
     printf '%s  %s\n' "$MADEIRA_VCRUNTIME_SHA256" "$TMP/runtime.zip" | shasum -a 256 -c -
     unzip -q "$TMP/runtime.zip" -d "$TMP/runtime"
     cp "$TMP/runtime"/*.dll "$DEST/"
+else
+    python3 "$R/tools/fetch-vcruntime.py" --destination "$DEST"
 fi
-for dll in concrt140 msvcp140 msvcp140_1 msvcp140_2 msvcp140_atomic_wait \
-    msvcp140_codecvt_ids vcamp140 vccorlib140 vcomp140 vcruntime140 \
-    vcruntime140_1 vcruntime140_threads; do
-    [ -s "$DEST/$dll.dll" ] || { echo "Missing external input: $DEST/$dll.dll (see docs/CODEMAGIC.md)" >&2; exit 1; }
-done
+python3 "$R/tools/fetch-vcruntime.py" --verify-only --destination "$DEST"

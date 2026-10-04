@@ -8,8 +8,8 @@ workflows:
       vars:
         BUILD_JOBS: "8"
         MADEIRA_CLEAN_NATIVE: "0"
-        # Configure MADEIRA_VCRUNTIME_URL and MADEIRA_VCRUNTIME_SHA256 as
-        # private environment variables in Codemagic (docs/CODEMAGIC.md).
+        # Microsoft runtime DLLs bootstrap automatically. Private overrides
+        # remain available; see docs/CODEMAGIC.md.
     cache:
       cache_paths:
         - $CM_BUILD_DIR/toolchains/downloads
@@ -28,7 +28,7 @@ workflows:
       - name: Install build tools and iOS Rust target
         script: |
           set -euo pipefail
-          brew install cmake ninja ccache autoconf automake libtool bison flex pkg-config llvm rustup
+          brew install cmake ninja ccache autoconf automake libtool bison flex pkg-config llvm rustup sevenzip
           export PATH="$(brew --prefix bison)/bin:$(brew --prefix flex)/bin:$(brew --prefix llvm)/bin:$HOME/.cargo/bin:$PATH"
           if ! rustup show active-toolchain >/dev/null 2>&1; then
             rustup-init -y --no-modify-path --default-toolchain stable
