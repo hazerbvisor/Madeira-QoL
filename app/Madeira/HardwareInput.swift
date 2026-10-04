@@ -567,6 +567,21 @@ final class HardwareInput: ObservableObject {
     // MARK: focus (main thread)
 
     private var appActive = true
+    private var sessionCapture: MouseCaptureBehavior = .automatic
+    private var sessionSensitivity: Double? // protected by motionLock
+
+    func configureSession(_ profile: PerformanceProfile?) {
+        sessionCapture = profile?.mouseCapture ?? .automatic
+        motionLock.lock(); sessionSensitivity = profile?.mouseSensitivity; carry.reset(); motionLock.unlock()
+        sessionFocusChanged()
+    }
+
+    func sessionFocusChanged() {
+        if LibraryModel.shared.menu || LibraryModel.shared.current == nil || TouchControlsModel.shared.editing {
+            setPointerLocked(false, byUs: false, why: "Madeira UI or session exit")
+        }
+        refreshFocus("session UI")
+    }
     /// The app is active, the game view is on screen and nothing is presented
     /// over it. Read by PadStickMouse.
     private(set) var baseFocused = true
@@ -808,6 +823,7 @@ final class HardwareInput: ObservableObject {
     private func evaluateFocus(_ why: String) {
         installTouchObserver()
         let base = computeBaseFocus()
+        if !base && pointerLocked { setPointerLocked(false, byUs: false, why: "focus lost") }
         let keyboard = base && !typingElsewhere()
         let over = hoverSeen ? pointerOver : clickFocus.onGame
         let mouse = base && (!Self.focusEnabled || pointerLocked || over || !gameButtons.isEmpty)
@@ -839,6 +855,9 @@ final class HardwareInput: ObservableObject {
     /// the scene's windows.
     private func computeBaseFocus() -> Bool {
         guard appActive, UIApplication.shared.applicationState == .active else { return false }
+        let library = LibraryModel.shared
+        if library.enabled && (library.current == nil || library.menu || library.launching) { return false }
+        if TouchControlsModel.shared.editing { return false }
         guard Self.focusEnabled else { return true }
         guard let v = MetalBackedView.keyboardTarget, let w = v.window,
               !v.isHidden, !w.isHidden, v.alpha > 0.01 else { return false }
@@ -1071,8 +1090,8 @@ final class HardwareInput: ObservableObject {
     /// and the same carry. Callable from either queue.
     private func postMotion(_ dx: Double, _ dy: Double) {
         // One aligned Double read of a value only the slider writes.
-        let gain = InputSettings.shared.sensMouse
         motionLock.lock()
+        let gain = sessionSensitivity ?? InputSettings.shared.sensMouse
         let d = carry.add(dx, dy, gain: gain)
         motionLock.unlock()
         postRelative(d.dx, d.dy)
@@ -1310,7 +1329,7 @@ final class HardwareInput: ObservableObject {
     }
 
     private func updateAutoLock() {
-        guard Self.autoLockEnabled, directCursorLive, Self.pointerLockAvailable, mousePath == .gcmouse else {
+        guard sessionCapture == .automatic, Self.autoLockEnabled, directCursorLive, Self.pointerLockAvailable, mousePath == .gcmouse else {
             if pointerLocked && lockedByUs { setPointerLocked(false, byUs: true, why: "automatic lock unavailable") }
             return
         }
@@ -1521,7 +1540,7 @@ final class HardwareInput: ObservableObject {
     }
 
     private func setPointerLocked(_ on: Bool, byUs: Bool, why: String) {
-        var want = on && mouseConnected && Self.lockEnabled
+        var want = on && mouseConnected && Self.lockEnabled && sessionCapture != .disabled && baseFocused
         // iPhone has no system pointer to lock (see `pointerLockAvailable`).
         // Nothing is lost: GCMouse deltas are raw HID reports and keep arriving
         // while the AssistiveTouch cursor sits against a screen edge.

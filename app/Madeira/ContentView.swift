@@ -165,9 +165,14 @@ final class MetalBackedView: UIView {
     /// window-level host view gets THIS frame, not our full bounds, and touch
     /// mapping uses the same rect, so letterboxing, cropping and stretching
     /// never skew input.
+    private var presentationBounds: CGRect {
+        let profile = LibraryModel.shared.activeEntry?.performanceUpgrade
+        return profile?.fullscreen == false ? bounds.inset(by: safeAreaInsets) : bounds
+    }
+
     private func gameRect() -> CGRect {
         let r = GameSurfaceLayout.rect(guest: guestSize(), aspect: drawableAspect(),
-                                       bounds: bounds, mode: effectiveDisplayMode())
+                                       bounds: presentationBounds, mode: effectiveDisplayMode(), pixelScale: window?.screen.scale ?? 1)
         return CGRect(x: r.minX, y: r.minY, width: max(r.width, 1), height: max(r.height, 1))
     }
 
@@ -181,6 +186,9 @@ final class MetalBackedView: UIView {
         guard let w = window else { return }
         let r = gameRect()
         MetalHostView.shared.frame = convert(r, to: w)
+        let nearest = effectiveDisplayMode() == .integer
+        MetalHostView.shared.metalLayer.magnificationFilter = nearest ? .nearest : .linear
+        MetalHostView.shared.metalLayer.minificationFilter = nearest ? .nearest : .linear
         // The desktop compositor lays the guest display out in the same rect,
         // so Aspect / Fill / Stretch / Fit apply to desktop sessions as well.
         winios_set_desktop_rect(r.minX - bounds.minX, r.minY - bounds.minY, r.width, r.height, 1)
@@ -286,7 +294,7 @@ final class MetalBackedView: UIView {
             return (px, py)
         }
         let g = GameSurfaceLayout.map(point: p, guest: guestSize(), aspect: drawableAspect(),
-                                      bounds: bounds, mode: effectiveDisplayMode())
+                                      bounds: presentationBounds, mode: effectiveDisplayMode(), pixelScale: window?.screen.scale ?? 1)
         return (Int32(g.x), Int32(g.y))
     }
 

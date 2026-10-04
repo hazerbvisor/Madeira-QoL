@@ -96,8 +96,10 @@ struct TouchControl: Codable, Equatable { var nx = 0.5 }
 enum ControlAction: Codable, Equatable, Hashable { case none }   // LibraryEntry.controllerBinds
 enum GamepadInput { static let keyboardMouseAvailable = true }   // LibraryEntry's per-game DirectInput choice
 enum LibraryError: LocalizedError { case message(String) }
+enum RendererCaches { static func prepare(_ entry: LibraryEntry) {} }
 func env(_ name: String) -> String? { getenv(name).map { String(cString: $0) } }
 '''
+swift += (root / 'app/Madeira/PerformancePolicy.swift').read_text() + '\n'
 swift += block(lib, 'struct LibraryEntry: Codable, Identifiable') + '\n'
 swift += block(lib, 'enum SyncEngine: String, CaseIterable, Identifiable') + '\n'
 swift += '\n'.join(l for l in display.splitlines() if not l.startswith('import ')) + '\n'
@@ -258,7 +260,12 @@ let phone = GuestDisplay.defaultMode(forLandscapeView: CGSize(width: 844, height
 let tablet = GuestDisplay.defaultMode(forLandscapeView: CGSize(width: 1024, height: 768))
 expect(phone.w == 1280 && phone.h == 720, "phone default mode is 1280x720")
 expect(tablet.w == 1152 && tablet.h == 864, "4:3 default mode is 1152x864 (cheapest 4:3 of at least 0.9 MP)")
-expect(DisplayMode.allCases.map { $0.label } == ["Fit", "Fill", "Stretch", "Aspect"], "the four Aspect & scaling choices")
+expect(DisplayMode.allCases.map { $0.label } == ["Fit", "Fill", "Stretch", "Aspect", "Integer pixels"], "scaling choices retain old profiles and add integer pixels")
+expect(GameSurfaceLayout.rect(guest: guest, aspect: drawn, bounds: view, mode: .fit) == aspect, "Fit preserves the real backbuffer aspect instead of stretching it")
+let integer = GameSurfaceLayout.rect(guest: guest, bounds: view, mode: .integer, pixelScale: 3)
+expect(near(integer.width * 3, guest.width) && near(integer.height * 3, guest.height), "integer scaling uses physical pixels, not UIKit points")
+let integerCenter = GameSurfaceLayout.map(point: CGPoint(x: integer.midX, y: integer.midY), guest: guest, bounds: view, mode: .integer, pixelScale: 3)
+expect(near(integerCenter.x, 640) && near(integerCenter.y, 360), "integer geometry and touch mapping agree")
 
 // Controller navigation.
 let c = LibraryController.shared

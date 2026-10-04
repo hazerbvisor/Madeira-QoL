@@ -366,7 +366,9 @@ final class LibraryModel: ObservableObject {
     @Published var entries: [LibraryEntry] = []
     @Published var current: UUID?
     @Published var activeEntry: LibraryEntry?
-    @Published var menu = false
+    @Published var menu = false {
+        didSet { if oldValue != menu { HardwareInput.shared.sessionFocusChanged() } }
+    }
     @Published var performance = false
     @Published var liveLogs = false
     @Published var fpsMode = 1
@@ -747,6 +749,8 @@ final class LibraryModel: ObservableObject {
         applyControllerMode()
         MetalHostView.shared.isHidden = false
         ProMotionIntent.apply(mode: entry.effectiveFPSMode)
+        ProMotionIntent.apply(cap: entry.performanceUpgrade?.fpsCap)
+        HardwareInput.shared.configureSession(entry.performanceUpgrade)
         if remember { var played = entry; played.lastPlayed = Date(); save(played) }
         launchDismissLogged = false
         DockStartScreen.shared.begin(dock, at: launchStarted)
@@ -828,6 +832,10 @@ final class LibraryModel: ObservableObject {
     private var controlsSink: AnyCancellable?
 
     func setFPS(_ mode: Int) {
+        if var profile = activeEntry?.performanceUpgrade {
+            profile.fpsCap = nil; activeEntry?.performanceUpgrade = profile
+        }
+        madeira_performance_set_cap(-1)
         fpsMode = mode
         let applied: Int32 = mode == 3 && !ProMotionIntent.has30Cap ? 1 : Int32(mode)
         madeira_set_vsync_locked(applied)
@@ -859,6 +867,7 @@ final class LibraryModel: ObservableObject {
             if ControlPresetsModel.enabled { entry.controlLayout = controls.layoutID }
             entry.touchControls = controls.visible
             entry.fpsMode = fpsMode; entry.performance = performance
+            entry.performanceUpgrade = activeEntry?.performanceUpgrade
             entry.overlayFields = overlayFields
             entry.controlOpacity = opacity; entry.controlSize = controls.sizeScale
             if GamepadInput.keyboardMouseAvailable { entry.controllerMode = controllerMode }
@@ -890,6 +899,7 @@ final class LibraryModel: ObservableObject {
         MetalHostView.shared.isHidden = true
         ProMotionIntent.shared.setActive(false)
         RendererCaches.finish()
+        HardwareInput.shared.configureSession(nil)
         madeira_performance_set_telemetry(0)
         fputs("[frontend] returned to library\n", stderr)
     }
@@ -2059,6 +2069,7 @@ struct LibraryView: View {
             if !settingsSearch.trimmingCharacters(in: .whitespaces).isEmpty {
                 SettingsSearchResults(query: settingsSearch.trimmingCharacters(in: .whitespaces), refresh: settingsRefresh)
             }
+            if settingsShow("cache", "shader", "pipeline", "performance") { RendererCacheSettings() }
             // Credits, last on the Settings page.
             if settingsShow("credits", "thanks", "Will Faust", "Nick", "125hz", "Jfishin", "Jesse", "JesseLovelace", "Dan Perks", "danperks") {
                 Section {
@@ -2424,6 +2435,7 @@ struct LibraryDetail: View {
                     }
                     FPSChoice(mode: $entry.fpsMode)
                 }
+                PerformanceProfileSettings(entry: $entry)
                 Section {
                     Toggle("Reduced-precision x87", isOn: $entry.reducedX87)
                     // Exported for this game only when chosen (applyEnvironment).

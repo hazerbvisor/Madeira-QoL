@@ -79,6 +79,16 @@ final class ProMotionIntent {
         madeira_set_display_max_fps(Int32(panelMaxFPS), Int32(hz))
     }
 
+    static func apply(cap: Int?) {
+        guard let cap else { return }
+        let panel = panelMaxFPS
+        // 40 divides a 120 Hz panel evenly. Keep its grid rather than asking
+        // iOS for an unsupported 40 Hz panel mode. 90 likewise uses the panel.
+        let intent = cap == 0 || cap == 40 || cap == 90 ? panel : min(cap, panel)
+        shared.setActive(true, maxHz: intent)
+        madeira_set_display_max_fps(Int32(panel), Int32(intent))
+    }
+
     @objc private func tick(_ sender: CADisplayLink) {}
 }
 
@@ -196,8 +206,8 @@ struct FPSOverlay: View {
                     .frame(width: 12, height: 12)
             }
         }
-        .onTapGesture { visible.toggle() }
-        .onAppear { startTimers() }
+        .onTapGesture { visible.toggle(); if visible { startTimers() } else { stopTimers() } }
+        .onAppear { if visible { startTimers() } }
         .onDisappear { stopTimers() }
     }
 
