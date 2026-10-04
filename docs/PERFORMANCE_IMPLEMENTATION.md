@@ -107,15 +107,49 @@ IPA still needs signing/installing and on-device runtime checks listed above.
 
 ## Phase 3 — spatial upscaling
 
-For native 32-bit D3D9, MadeiraFX Off/Quality/Balanced/Performance/Auto requests a lower session monitor
-and explicitly distinguishes requested internal resolution from output. The
-shared native DXMT Presenter encodes public MetalFX Spatial on the same game
-command buffer with the existing fence. Scalers are reused by dimension/format,
-capability checked and allocation/usage failure falls back to the original blit.
-HDR, gamma and MSAA retain the original path. A game can override the requested
-monitor; its actual texture dimensions are authoritative. No extra history or
-presentation queue is allocated. The upstream opt-in spatial swapchain is
-suppressed while this path is requested to avoid double upscaling/asserts.
+MadeiraFX Off/Quality/Balanced/Performance/Auto requests a lower session monitor
+and distinguishes requested game resolution from output. Native and guest
+**32-bit and 64-bit local DXMT D3D9/D3D11** now share the host drawable-texture
+bridge, including emulated i386 D3D9 and mixed D3D11/D3D9 metadata. It does not
+require replacing the verified guest DLLs or extending their Unix-call ABI.
+
+The host stores the renderer's requested layer dimensions. When acquiring a
+drawable it reserves a smaller, tracked presentation texture, enlarges only the
+real output drawable, and returns the smaller texture through the existing
+`MetalDrawable_texture` thunk. Guest viewport state and game resources keep their
+original dimensions. Layer property reads also return the renderer's requested
+size, preventing a later guest swapchain from inheriting the larger output.
+Spatial encoding happens after the original presenter completes gamma/format
+conversion and MSAA resolve, on the same command buffer before presentation.
+
+Each layer reuses at most three separately leased texture/scaler pairs. Optional
+input texture allocation has an atomic **64 MiB global budget** across layers;
+MetalFX's opaque workspace is additional and not included in that bound. No
+extra command queue, delayed native frame or temporal history is added. A lease
+returns only on GPU completion or destruction of an unsubmitted drawable;
+completion and drawable destruction cannot release a reused slot twice.
+Pressure purges idle storage and stops new reservations; referenced GPU storage
+survives until its users release it. Configuration/dimension changes invalidate
+reuse without freeing live game resources.
+
+Unsupported capabilities, HDR/EDR output, non-BGRA8/RGBA8 Unorm formats, allocation
+failure and pool/budget exhaustion preserve the renderer's original drawable
+size and blit. Once a texture was redirected, an incompatible output usage falls
+back to a real renderer scale pass using DXMT's existing compiled Metal library.
+Fallback resources are prepared off the main thread before redirection, and the
+HUD distinguishes this fallback from active MetalFX. The guest opt-in spatial
+swapchain is suppressed to avoid two independent upscalers and its assert path.
+A game can still ignore the lower monitor request; smaller presentation storage
+alone does not prove reduced game rendering workload.
+
+With diagnostics enabled, the host identifies final-present render encoders by
+their drawable texture and observes the color source bound at fragment slot 0.
+It reports that **actual game backbuffer**, the presentation input and output
+separately; unrelated scene textures are never treated as motion/depth data.
+Missing observations remain unavailable. Auto scale advice additionally requires
+an observed game backbuffer below output resolution, so a smaller presentation
+texture alone cannot qualify as reduced game rendering cost. This color-source
+observation also works with Spatial off and preserves legacy pacing.
 
 Phase 3 release compilation/link/package passed (125.00 seconds), with native
 winemetal and Presenter rebuilt and unsupported-device resolution fallback
@@ -181,9 +215,12 @@ presentation. No production backend is registered, so generation and temporal
 reconstruction remain disabled. Host tests use fake textures/providers to test
 admission and accounting only; they do not synthesize any image.
 
-Phase 5 app/helper release build passed (129.90 seconds). A final native-route
-compatibility audit found that guest Presenters do not call the native spatial
-bridge; the correction and final rebuild are included in this branch.
+Phase 5 app/helper release build passed (129.90 seconds). The later guest Spatial
+revision exposes a completed presentation color image, but still does not supply
+trustworthy scene depth, game motion vectors, camera jitter or exposure. The
+actual iPhoneOS 26.5 `MTLFXFrameInterpolator.h` was checked: its input contract
+requires motion/depth data and coherent prior color history. Availability of the
+SDK API alone does not make the current generic renderer supply those inputs.
 
 ## Completion report and checklist
 
@@ -203,13 +240,10 @@ bridge; the correction and final rebuild are included in this branch.
 
 ### Partially implemented / runtime-dependent
 
-- MetalFX Spatial works at the source integration boundary for **native 32-bit
-  D3D9** only, with `d3d9 = native`, supported device/texture usage and a game
-  honoring the requested monitor. Guest D3D11, 64-bit D3D9 and emulated i386 D3D9
-  are excluded. Native property updates are tagged per calling thread before
-  hopping to UIKit; guest calls keep their original drawable dimensions even
-  when layers are shared. Remote Metal's tagged handles are never messaged as
-  local Metal objects. Actual image quality/activation remains device-unverified.
+- MetalFX Spatial is integrated for **local 32/64-bit DXMT D3D9/D3D11**, preserving
+  guest viewport state through the host texture bridge. Remote Metal, desktop
+  composition and unvalidated D3D12 are excluded. Actual MetalFX images, resource
+  usage compatibility and driver/allocation fallback remain device-unverified.
 - Renderer persistence uses DXMT's SQLite cache plus public normal render/compute
   Metal archives. Mesh pipelines are not archived by the new hook. Real warm
   launch reuse and pipeline compatibility still need device verification.
@@ -228,10 +262,9 @@ bridge; the correction and final rebuild are included in this branch.
 - **FEX:** current iOS persistent-code load/finalization lacks safe bounded parsing,
   executable allocation/relocation and bridge page registration. Its contribution
   instructions also prohibit AI code changes. Persistent FEX cache stays off.
-- **Guest DXMT Presenters:** D3D11/64-bit/emulated D3D9 spatial integration needs a
-  validated guest DLL/Unix-call bridge change, or a redesigned presentation
-  texture contract. Host drawable resizing alone would break the guest viewport.
-  Those paths retain original resolution/presentation instead.
+- **Other presentation paths:** remote Metal, desktop composition, D3D12 and HDR
+  upscaling remain excluded. The guest D3D9/D3D11 viewport blocker has been
+  removed by the new texture contract, rather than by resizing guest drawables.
 - **Live DRS:** game-owned render targets cannot be safely recreated from the
   generic present boundary. Game/renderer cooperation is required.
 - **Temporal and interpolation:** motion vectors, depth, camera jitter, exposure,
@@ -240,6 +273,12 @@ bridge; the correction and final rebuild are included in this branch.
   architecture/profile data; only Off is effective. The provider contract also
   requires a separate latency/presentation schedule and separate generated-frame
   accounting. No generated image or synthetic FPS gain is shipped.
+
+Changing the virtual monitor's environment while running is insufficient for
+live DRS: Wine's session monitor and game-owned targets have independent state.
+Sending window-size messages would require a cooperating game and confirmation
+that it resized its real render targets. No generic resize request or guessed
+depth/motion binding is shipped as a substitute for that cooperation.
 
 ### Validation checklist
 
@@ -251,7 +290,7 @@ bridge; the correction and final rebuild are included in this branch.
 | Fullscreen enter/exit, safe areas/orientation | Geometry/coordinate tests and cancellation pass; appearance and actual UIKit lifecycle require device |
 | Mouse capture/release and keyboard | Focus/edge/PC key maps and interruption tests pass; physical iPad pointer lock and shortcuts require device |
 | Controller fallback | Four slots, disconnect/reconnect, signed ranges, packet ABI, concurrent snapshots and neutral UI behavior covered by host tests |
-| MetalFX capability fallback | Native/guest/remote/profile admission and per-thread sizing tests pass; actual GPU unsupported-device/allocation fallback requires device |
+| MetalFX capability fallback | Native/guest/remote/profile admission, texture sizing, atomic global budget and lease release tests pass; actual GPU image/allocation/usage fallback requires device |
 | Cache invalidation | Valid SQLite preserved; corrupt DB/journals/locks evicted; unrelated files retained; Metal archive corruption/warm reuse require device |
 | HUD completely disabled | Production coordinator test verifies no timer/callback sampling with HUD and Auto off, including menu/launch/background pause |
 | Memory and thermal | Adaptive policy and coordinator pressure tests pass; actual iOS notifications, resident GPU use and long-session behavior require device |
@@ -269,13 +308,14 @@ separate, and record at least a sustained session for thermal/memory behavior.
 
 ### Final build and delivery
 
-The final app and JIT helper release build passed in **129.61 seconds** using
+The previous five-phase checkpoint's app/helper release build passed in **129.61 seconds** using
 xtool 1.20.1, Swift 6.3.3 and the actual iPhoneOS 26.5 SDK on Linux. Affected
 native winemetal and Presenter objects were rebuilt. All 13 host suites passed:
 frontend/profile/geometry, hardware input, gamepad transport, touch gamepad,
 control layouts, input cancellation, frame deadlines/profile migration,
 adaptive policy, runtime lifecycle, reconstruction policy, reconstruction
-provider contracts, SQLite cache fallback and spatial caller routing.
+provider contracts, SQLite cache fallback and spatial caller routing. The guest
+texture bridge replaces that checkpoint's native-only Spatial routing.
 
 Final edge-case checks cover preserving aspect ratios at minimum internal
 dimensions, enforcing the native output target when UIKit display scale already
@@ -290,5 +330,27 @@ ZIP integrity, all 1,075 reference resource hashes, arm64 iOS executable load
 commands, deployment targets, executable permissions and bundled dependencies.
 The app retains its iOS 17 minimum and the existing JIT helper its iOS 26 minimum.
 This is an unsigned package: installation, app/game launch and performance on a
-physical device remain unverified. PR #2 contains the complete review branch;
+physical device remain unverified. PR #2 contains the implementation review branch;
 main was not changed.
+
+### Device checks for the guest Spatial bridge
+
+The guest bridge's final app/helper release build passed in **133.86 seconds**,
+including the drawable-reuse correction. The native winemetal and Presenter
+objects were rebuilt, and Apple SDK syntax checks found no new source warnings.
+All 13 host suites were rerun for this revision. The spatial suite now covers
+invalid/aspect-constrained sizes, eight-thread global allocation contention,
+idempotent GPU/unsubmitted-frame lease return, shared x86_64/WoW64 thunk routing,
+legacy pacing completion and the compiled-library fallback. Host coverage cannot
+execute the actual MetalFX driver, shader specialization or iOS drawable pool.
+
+Use a local DXMT D3D9 or D3D11 game entry, keep its normal compatibility settings,
+choose output 1280×960 and Quality or Balanced, then launch with the Graphics HUD
+field enabled. The game must use the requested lower session resolution; select
+it in-game if its saved resolution overrides the monitor. The HUD should show
+the actual lower backbuffer, the presentation input, the output and **Spatial
+active**. A named fallback or unavailable dimensions are diagnostic results,
+not evidence of active MetalFX. Compare the same scene with Spatial Off for
+image quality, stable frame time and sustained memory/thermal behavior. Also
+exercise menu/background transitions and allocation/format/pressure fallback.
+This procedure has not been run here because no iOS GPU or game is connected.

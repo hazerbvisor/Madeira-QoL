@@ -267,13 +267,18 @@ expect(nativeFX.spatialCompatible && nativeFX.sessionResolution == "\(nativeSize
 nativeFX.configureLaunch()
 expect(env("DXMT_METALFX_SPATIAL_SWAPCHAIN") == "0", "one host spatial path suppresses the independent guest upscaler")
 nativeFX.bits = 64
-expect(!nativeFX.spatialCompatible && nativeFX.sessionResolution == nativeFX.resolution, "64-bit guest Presenter retains original sizing")
+expect(nativeFX.spatialCompatible && nativeFX.sessionResolution != nativeFX.resolution, "64-bit D3D9 uses the native drawable-texture bridge")
 nativeFX.bits = 32; nativeFX.graphicsAPI = "D3D11"
-expect(!nativeFX.spatialCompatible, "D3D11 guest Presenter cannot use native spatial hooks")
+expect(nativeFX.spatialCompatible, "D3D11 guest Presenter uses the shared drawable-texture bridge")
 nativeFX.graphicsAPI = "D3D11/D3D9"
-expect(!nativeFX.spatialCompatible, "ambiguous mixed-API metadata cannot opt a guest Presenter into native spatial")
+expect(nativeFX.spatialCompatible, "mixed D3D11/D3D9 metadata uses two supported DXMT paths")
 nativeFX.graphicsAPI = "D3D9"; MadeiraConfig.values["d3d9"] = "emulated"
-expect(!nativeFX.spatialCompatible, "emulated i386 Presenter cannot use native spatial hooks")
+expect(nativeFX.spatialCompatible, "emulated i386 Presenter uses the same native drawable-texture bridge")
+nativeFX.graphicsAPI = "D3D12"
+expect(!nativeFX.spatialCompatible, "unvalidated D3D12 is excluded")
+nativeFX.graphicsAPI = "D3D9"; nativeFX.desktop = true
+expect(!nativeFX.spatialCompatible, "desktop composition is excluded")
+nativeFX.desktop = false
 MadeiraConfig.values["d3d9"] = "native"; MadeiraConfig.values["remote"] = "diagnostic remote backend"
 expect(!nativeFX.spatialCompatible, "remote Metal handles are excluded from local MetalFX")
 MadeiraConfig.values["d3d9"] = nil; MadeiraConfig.values["remote"] = nil; spatialDevice = 0

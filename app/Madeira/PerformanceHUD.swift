@@ -39,12 +39,17 @@ struct LibraryMetrics: View {
             lines.append(value.frameMS > 0 ? String(format: "Submit intervals: %.1f avg · %.1f p95 · %.1f max ms", value.frameMS, value.p95MS, value.maxMS) : "Submit intervals: unavailable")
         }
         if fields.contains("Graphics") {
-            let dimensions = value.internalWidth > 0 ? "\(value.internalWidth)×\(value.internalHeight) → \(value.outputWidth)×\(value.outputHeight)"
+            let dimensions = value.internalWidth > 0 ? "Backbuffer \(value.internalWidth)×\(value.internalHeight) → \(value.outputWidth)×\(value.outputHeight)"
                 : (value.outputWidth > 0 ? "Internal: unavailable · Output \(value.outputWidth)×\(value.outputHeight)" : "Render dimensions: unavailable")
             let scale = value.outputWidth > 0 && value.internalWidth > 0 ? String(format: " · %.0f%% actual", Double(value.internalWidth) / Double(value.outputWidth) * 100) : ""
             let requested = library.activeEntry?.performanceUpgrade?.fxMode ?? .off
-            let state = value.spatialActive ? "Spatial active" : (requested == .off ? "Off" : "Original blit (fallback)")
+            let reasons = [2: "Renderer scale fallback", 3: "Paused for pressure", 4: "Format/device unsupported",
+                           5: "No compatible lower resolution", 6: "Storage/scaler unavailable"]
+            let state = value.spatialActive ? "Spatial active" : (requested == .off ? "Off" : (reasons[value.spatialStatus] ?? "Original blit (fallback)"))
             lines.append(dimensions + scale)
+            if value.presentationWidth > 0 && (value.presentationWidth != value.internalWidth || value.presentationHeight != value.internalHeight) {
+                lines.append("Present input: \(value.presentationWidth)×\(value.presentationHeight) · Game backbuffer differs")
+            }
             lines.append("MadeiraFX \(requested.label): \(state) · Interpolation: off")
         }
         if fields.contains("CPU/GPU") {

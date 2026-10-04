@@ -1,11 +1,13 @@
 #import "PerformanceBridge.h"
 #include "FrameDeadline.h"
+#include "SpatialPresentationPolicy.h"
 #include <stdatomic.h>
 #include <pthread.h>
 #include <mach/mach_time.h>
 #include <stdlib.h>
 #include <os/proc.h>
 #import <MetalFX/MetalFX.h>
+#import <objc/runtime.h>
 
 static _Atomic int cap = -1, telemetry, connected;
 static pthread_mutex_t samplesLock = PTHREAD_MUTEX_INITIALIZER;
@@ -23,11 +25,321 @@ static unsigned archiveRecords;
 static _Atomic unsigned pendingArchiveRecords;
 static _Atomic int cachePressure;
 static _Atomic int spatialEnabled, outputWidth, outputHeight;
-static _Thread_local unsigned nativePropsDepth;
-static pthread_mutex_t spatialLock = PTHREAD_MUTEX_INITIALIZER;
-static id<MTLFXSpatialScaler> spatialScaler;
-static NSUInteger scalerDimensions[6];
-static BOOL scalerFailed;
+static _Atomic uint64_t spatialGeneration;
+static _Atomic uint64_t spatialResidentBytes;
+static pthread_mutex_t spatialRegistryLock = PTHREAD_MUTEX_INITIALIZER;
+static NSHashTable *spatialLayers;
+
+/* These objects never cross the Wine ABI. Both i386 and x86_64 thunks continue
+ * returning ordinary native object handles with their existing retain rules. */
+@interface MadeiraSpatialSurface : NSObject
+@property(nonatomic, strong) id<MTLTexture> texture;
+@property(nonatomic, strong) id<MTLFXSpatialScaler> scaler;
+@property(nonatomic, strong) id<MTLRenderPipelineState> fallback;
+@property(nonatomic) MadeiraSpatialSize size;
+@property(nonatomic) uint64_t generation;
+@property(nonatomic) BOOL leased;
+@property(nonatomic) uint64_t accountedBytes;
+@end
+@implementation MadeiraSpatialSurface
+- (void)dealloc { if (_accountedBytes) atomic_fetch_sub(&spatialResidentBytes, _accountedBytes); }
+@end
+
+@interface MadeiraSpatialLayer : NSObject
+@property(nonatomic, strong) NSLock *lock;
+@property(nonatomic, strong) NSMutableArray<MadeiraSpatialSurface *> *surfaces;
+@property(nonatomic) CGSize requestedSize;
+@property(nonatomic) MadeiraSpatialSize failedSize;
+@property(nonatomic) NSUInteger failedFormat;
+@property(nonatomic) uint64_t failedGeneration;
+@end
+@implementation MadeiraSpatialLayer
+- (instancetype)init {
+    if ((self = [super init])) { _lock = [NSLock new]; _surfaces = [NSMutableArray new]; }
+    return self;
+}
+@end
+
+@interface MadeiraSpatialFrame : NSObject { @public MadeiraSpatialLease lease; }
+@property(nonatomic, strong) MadeiraSpatialLayer *owner;
+@property(nonatomic, strong) MadeiraSpatialSurface *surface;
+@property(nonatomic) BOOL submitted;
+@end
+@implementation MadeiraSpatialFrame
+- (instancetype)init {
+    if ((self = [super init])) atomic_init(&lease.finished, 0);
+    return self;
+}
+- (void)dealloc {
+    // A dropped/unsubmitted drawable also returns its optional storage.
+    [_owner.lock lock];
+    if (madeira_spatial_finish_lease(&lease)) _surface.leased = NO;
+    [_owner.lock unlock];
+}
+@end
+static char spatialLayerKey, spatialFrameKey, spatialStatusKey;
+static char presentTextureKey, presentEncoderKey, presentObservationKey;
+@interface MadeiraPresentObservation : NSObject
+@property(nonatomic) CGSize gameSize;
+@property(nonatomic) CGSize presentationSize;
+@end
+@implementation MadeiraPresentObservation
+@end
+
+int madeira_spatial_requested(void) {
+    const char *remote = getenv("DXMT_REMOTE_METAL");
+    return !(remote && *remote) && atomic_load(&spatialEnabled);
+}
+
+void madeira_spatial_layer_configure(CAMetalLayer *layer, double width, double height) {
+    MadeiraSpatialLayer *state = objc_getAssociatedObject(layer, &spatialLayerKey);
+    if (!state && !madeira_spatial_requested()) return;
+    if (!state) {
+        state = [MadeiraSpatialLayer new];
+        objc_setAssociatedObject(layer, &spatialLayerKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        pthread_mutex_lock(&spatialRegistryLock);
+        if (!spatialLayers) spatialLayers = [NSHashTable weakObjectsHashTable];
+        [spatialLayers addObject:state];
+        pthread_mutex_unlock(&spatialRegistryLock);
+    }
+    [state.lock lock]; state.requestedSize = CGSizeMake(width, height); [state.lock unlock];
+}
+
+static void spatialPurge(void) {
+    pthread_mutex_lock(&spatialRegistryLock);
+    NSArray *states = spatialLayers.allObjects;
+    pthread_mutex_unlock(&spatialRegistryLock);
+    for (MadeiraSpatialLayer *state in states) {
+        [state.lock lock];
+        for (MadeiraSpatialSurface *surface in [state.surfaces copy])
+            if (!surface.leased) [state.surfaces removeObject:surface];
+        [state.lock unlock];
+    }
+}
+
+void madeira_spatial_layer_requested_size(CAMetalLayer *layer, double *width, double *height) {
+    MadeiraSpatialLayer *state = objc_getAssociatedObject(layer, &spatialLayerKey);
+    if (!state) return;
+    [state.lock lock]; CGSize size = state.requestedSize; [state.lock unlock];
+    if (size.width > 0 && size.height > 0) { *width = size.width; *height = size.height; }
+}
+
+static id<MTLRenderPipelineState> spatialFallback(id<MTLDevice> device, MTLPixelFormat format) {
+    // Reuse the native renderer's verified, compiled Metal 3.1 library instead
+    // of introducing a shader source or requiring an offline Metal compiler.
+    // All color conversion, gamma and MSAA resolve already happened upstream.
+    extern unsigned char dxmt_command[];
+    extern unsigned int dxmt_command_len;
+    NSError *error = nil;
+    dispatch_data_t data = dispatch_data_create(dxmt_command, dxmt_command_len,
+        dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), DISPATCH_DATA_DESTRUCTOR_DEFAULT);
+    id<MTLLibrary> library = [device newLibraryWithData:data error:&error];
+    if (!library) return nil;
+    MTLFunctionConstantValues *constants = [MTLFunctionConstantValues new];
+    bool disabled = false;
+    for (NSUInteger index = 0x100; index <= 0x105; index++)
+        [constants setConstantValue:&disabled type:MTLDataTypeBool atIndex:index];
+    MTLRenderPipelineDescriptor *desc = [MTLRenderPipelineDescriptor new];
+    desc.vertexFunction = [library newFunctionWithName:@"vs_present_quad"];
+    desc.fragmentFunction = [library newFunctionWithName:@"fs_present_quad" constantValues:constants error:&error];
+    if (!desc.vertexFunction || !desc.fragmentFunction) return nil;
+    desc.colorAttachments[0].pixelFormat = format;
+    madeira_pipeline_attach(device, desc);
+    id<MTLRenderPipelineState> pipeline = [device newRenderPipelineStateWithDescriptor:desc error:&error];
+    if (pipeline) madeira_pipeline_record(device, desc);
+    return pipeline;
+}
+
+static MadeiraSpatialSurface *spatialReserve(MadeiraSpatialLayer *state, id<MTLDevice> device,
+                                            MTLPixelFormat format, MadeiraSpatialSize size) {
+    uint64_t generation = atomic_load(&spatialGeneration);
+    [state.lock lock];
+    uint64_t resident = 0;
+    MadeiraSpatialSurface *reusable = nil;
+    for (MadeiraSpatialSurface *surface in [state.surfaces copy]) {
+        MadeiraSpatialSize previous = surface.size;
+        BOOL match = surface.generation == generation && surface.texture.device == device &&
+            surface.texture.pixelFormat == format && !memcmp(&previous, &size, sizeof(size));
+        if (!surface.leased && !match) [state.surfaces removeObject:surface];
+        else {
+            resident += madeira_spatial_surface_bytes(surface.size);
+            if (!surface.leased) reusable = surface;
+        }
+    }
+    if (reusable) { reusable.leased = YES; [state.lock unlock]; return reusable; }
+    MadeiraSpatialSize failed = state.failedSize;
+    if (state.surfaces.count >= MADEIRA_SPATIAL_SURFACES || !madeira_spatial_can_allocate(resident, size) ||
+        (state.failedGeneration == generation && state.failedFormat == format &&
+         !memcmp(&failed, &size, sizeof(size)))) { [state.lock unlock]; return nil; }
+    [state.lock unlock];
+
+    if ([NSThread isMainThread] || !madeira_spatial_reserve_bytes(&spatialResidentBytes, size)) return nil;
+
+    MTLFXSpatialScalerDescriptor *desc = [MTLFXSpatialScalerDescriptor new];
+    desc.inputWidth = size.input_width; desc.inputHeight = size.input_height;
+    desc.outputWidth = size.output_width; desc.outputHeight = size.output_height;
+    desc.colorTextureFormat = format; desc.outputTextureFormat = format;
+    desc.colorProcessingMode = MTLFXSpatialScalerColorProcessingModePerceptual;
+    id<MTLFXSpatialScaler> scaler = [desc newSpatialScalerWithDevice:device];
+    id<MTLRenderPipelineState> fallback = nil;
+    // Share the immutable fallback PSO across the three independent in-flight scalers.
+    [state.lock lock];
+    for (MadeiraSpatialSurface *surface in state.surfaces)
+        if (surface.texture.device == device && surface.texture.pixelFormat == format) { fallback = surface.fallback; break; }
+    [state.lock unlock];
+    if (!fallback && scaler) fallback = spatialFallback(device, format);
+    MTLTextureDescriptor *textureDesc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format
+        width:size.input_width height:size.input_height mipmapped:NO];
+    textureDesc.storageMode = MTLStorageModePrivate;
+    textureDesc.hazardTrackingMode = MTLHazardTrackingModeTracked;
+    textureDesc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead | scaler.colorTextureUsage;
+    id<MTLTexture> texture = scaler && fallback ? [device newTextureWithDescriptor:textureDesc] : nil;
+    MadeiraSpatialSurface *surface = nil;
+    if (texture) {
+        surface = [MadeiraSpatialSurface new]; surface.texture = texture; surface.scaler = scaler;
+        surface.fallback = fallback; surface.size = size; surface.generation = generation; surface.leased = YES;
+        surface.accountedBytes = madeira_spatial_surface_bytes(size);
+    } else atomic_fetch_sub(&spatialResidentBytes, madeira_spatial_surface_bytes(size));
+    [state.lock lock];
+    // Another encode thread can reserve during resource creation. Never grow the pool unchecked.
+    resident = 0;
+    for (MadeiraSpatialSurface *existing in state.surfaces) resident += madeira_spatial_surface_bytes(existing.size);
+    if (surface && state.surfaces.count < MADEIRA_SPATIAL_SURFACES && madeira_spatial_can_allocate(resident, size))
+        [state.surfaces addObject:surface];
+    else if (!texture) {
+        surface = nil;
+        state.failedSize = size; state.failedFormat = format; state.failedGeneration = generation;
+    } else surface = nil;
+    [state.lock unlock];
+    return surface;
+}
+
+id<CAMetalDrawable> madeira_spatial_next_drawable(CAMetalLayer *layer) {
+    MadeiraSpatialLayer *state = objc_getAssociatedObject(layer, &spatialLayerKey);
+    if (!state) return [layer nextDrawable];
+    [state.lock lock]; CGSize requested = state.requestedSize; [state.lock unlock];
+    MadeiraSpatialSize size;
+    MadeiraSpatialSurface *surface = nil;
+    MTLPixelFormat format = layer.pixelFormat;
+    int status = 0;
+    if (madeira_spatial_requested()) {
+        if (atomic_load(&cachePressure)) status = 3;
+        else if (layer.framebufferOnly || layer.wantsExtendedDynamicRangeContent ||
+            (format != MTLPixelFormatBGRA8Unorm && format != MTLPixelFormatRGBA8Unorm) ||
+            ![MTLFXSpatialScalerDescriptor supportsDevice:layer.device]) status = 4;
+        else if (!madeira_spatial_size(requested.width, requested.height,
+                 atomic_load(&outputWidth), atomic_load(&outputHeight), &size)) status = 5;
+        else { surface = spatialReserve(state, layer.device, format, size); status = surface ? 1 : 6; }
+    }
+    CGSize actual = surface ? CGSizeMake(size.output_width, size.output_height) : requested;
+    if (!CGSizeEqualToSize(layer.drawableSize, actual)) {
+        void (^update)(void) = ^{ layer.drawableSize = actual; };
+        if ([NSThread isMainThread]) update(); else dispatch_sync(dispatch_get_main_queue(), update);
+    }
+    id<CAMetalDrawable> drawable = [layer nextDrawable];
+    if (drawable) {
+        // A recycled drawable may still carry its completed prior frame. Clear
+        // it even when this acquisition falls back to the original renderer.
+        objc_setAssociatedObject(drawable, &spatialFrameKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(drawable, &spatialStatusKey, @(status), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (surface && drawable) {
+        MadeiraSpatialFrame *frame = [MadeiraSpatialFrame new]; frame.owner = state; frame.surface = surface;
+        objc_setAssociatedObject(drawable, &spatialFrameKey, frame, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    } else if (surface) { [state.lock lock]; surface.leased = NO; [state.lock unlock]; }
+    return drawable;
+}
+
+id<MTLTexture> madeira_spatial_drawable_texture(id<CAMetalDrawable> drawable) {
+    MadeiraSpatialFrame *frame = objc_getAssociatedObject(drawable, &spatialFrameKey);
+    id<MTLTexture> texture = frame ? frame.surface.texture : drawable.texture;
+    if (texture && atomic_load(&telemetry))
+        objc_setAssociatedObject(texture, &presentTextureKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return texture;
+}
+
+void madeira_spatial_track_encoder(id<MTLRenderCommandEncoder> encoder, id<MTLCommandBuffer> buffer,
+                                   id<MTLTexture> target) {
+    if (!atomic_load(&telemetry) || !encoder || !objc_getAssociatedObject(target, &presentTextureKey)) return;
+    MadeiraPresentObservation *observation = [MadeiraPresentObservation new];
+    observation.presentationSize = CGSizeMake(target.width, target.height);
+    objc_setAssociatedObject(encoder, &presentEncoderKey, observation, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(buffer, &presentObservationKey, observation, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+void madeira_spatial_note_backbuffer(id<MTLRenderCommandEncoder> encoder, id<MTLTexture> texture, unsigned index) {
+    if (!atomic_load(&telemetry) || index != 0 || !texture) return;
+    MadeiraPresentObservation *observation = objc_getAssociatedObject(encoder, &presentEncoderKey);
+    // Only the identified DXMT final presentation pass's color source is known.
+    // Arbitrary scene render targets/depth or shader bindings are never guessed.
+    if (observation) observation.gameSize = CGSizeMake(texture.width, texture.height);
+}
+
+static void spatialFinish(id<MTLCommandBuffer> buffer, id<CAMetalDrawable> drawable) {
+    if (atomic_load(&telemetry)) {
+        MadeiraPresentObservation *observation = objc_getAssociatedObject(buffer, &presentObservationKey);
+        CGSize game = observation ? observation.gameSize : CGSizeZero;
+        CGSize presentation = observation ? observation.presentationSize : CGSizeZero;
+        pthread_mutex_lock(&samplesLock);
+        metrics.internal_width = (int)game.width; metrics.internal_height = (int)game.height;
+        metrics.presentation_width = (int)presentation.width; metrics.presentation_height = (int)presentation.height;
+        pthread_mutex_unlock(&samplesLock);
+    }
+    MadeiraSpatialFrame *frame = objc_getAssociatedObject(drawable, &spatialFrameKey);
+    if (!frame) {
+        if (atomic_load(&telemetry)) {
+            pthread_mutex_lock(&samplesLock);
+            metrics.spatial_active = 0;
+            metrics.spatial_status = [objc_getAssociatedObject(drawable, &spatialStatusKey) intValue];
+            pthread_mutex_unlock(&samplesLock);
+        }
+        return;
+    }
+    if (frame.submitted) return;
+    frame.submitted = YES;
+    MadeiraSpatialSurface *surface = frame.surface;
+    id<MTLTexture> output = drawable.texture;
+    BOOL encoded = output.device == buffer.device &&
+        output.width == surface.size.output_width && output.height == surface.size.output_height &&
+        output.pixelFormat == surface.texture.pixelFormat &&
+        (output.usage & surface.scaler.outputTextureUsage) == surface.scaler.outputTextureUsage;
+    if (encoded) {
+        surface.scaler.colorTexture = surface.texture; surface.scaler.outputTexture = output;
+        surface.scaler.inputContentWidth = surface.size.input_width;
+        surface.scaler.inputContentHeight = surface.size.input_height;
+        [surface.scaler encodeToCommandBuffer:buffer];
+    } else {
+        MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];
+        pass.colorAttachments[0].texture = output;
+        pass.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+        pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+        id<MTLRenderCommandEncoder> encoder = [buffer renderCommandEncoderWithDescriptor:pass];
+        [encoder setRenderPipelineState:surface.fallback];
+        [encoder setFragmentTexture:surface.texture atIndex:0];
+        float metadata[3] = {1, 10000, 100}; // DXMTPresentMetadata, neutral SDR output
+        [encoder setFragmentBytes:metadata length:sizeof(metadata) atIndex:0];
+        [encoder setViewport:(MTLViewport){0, 0, output.width, output.height, 0, 1}];
+        [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        [encoder endEncoding];
+    }
+    [buffer addCompletedHandler:^(id<MTLCommandBuffer> done) {
+        (void)done;
+        // Do not reuse or discard GPU-referenced textures before completion.
+        surface.scaler.colorTexture = nil; surface.scaler.outputTexture = nil;
+        [frame.owner.lock lock];
+        if (madeira_spatial_finish_lease(&frame->lease)) surface.leased = NO;
+        if (atomic_load(&cachePressure) || surface.generation != atomic_load(&spatialGeneration))
+            [frame.owner.surfaces removeObject:surface];
+        [frame.owner.lock unlock];
+    }];
+    if (atomic_load(&telemetry)) {
+        pthread_mutex_lock(&samplesLock);
+        metrics.presentation_width = (int)surface.texture.width; metrics.presentation_height = (int)surface.texture.height;
+        metrics.spatial_active = encoded;
+        metrics.spatial_status = encoded ? 1 : 2;
+        pthread_mutex_unlock(&samplesLock);
+    }
+}
 
 int madeira_spatial_supported(void) {
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -39,77 +351,9 @@ int madeira_spatial_configure(int enabled, int width, int height) {
     BOOL supported = enabled && width >= 320 && height >= 240 && width <= 8192 && height <= 8192 && madeira_spatial_supported();
     atomic_store(&spatialEnabled, supported);
     atomic_store(&outputWidth, width); atomic_store(&outputHeight, height);
-    pthread_mutex_lock(&spatialLock);
-    spatialScaler = nil; memset(scalerDimensions, 0, sizeof(scalerDimensions)); scalerFailed = NO;
-    pthread_mutex_unlock(&spatialLock);
+    atomic_fetch_add(&spatialGeneration, 1);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ spatialPurge(); });
     return supported;
-}
-
-void madeira_spatial_native_props(int active) {
-    if (active) nativePropsDepth++;
-    else if (nativePropsDepth) nativePropsDepth--;
-}
-int madeira_spatial_native_props_active(void) { return nativePropsDepth > 0; }
-
-void madeira_spatial_adjust_size(int native, double *width, double *height) {
-    if (!native || !atomic_load(&spatialEnabled) || !width || !height || !isfinite(*width) || !isfinite(*height) || *width <= 0 || *height <= 0) return;
-    double factor = MIN((double)atomic_load(&outputWidth) / *width,
-                        (double)atomic_load(&outputHeight) / *height);
-    // Preserve unusual swapchain aspect ratios; never resize the game's resources.
-    // Native D3D9 may already multiply the window by UIKit's contentsScale.
-    // The explicit output target must also replace that oversized drawable.
-    if (factor > 0 && factor <= 4) { *width = round(*width * factor); *height = round(*height * factor); }
-}
-
-int madeira_spatial_encode(uintptr_t command, uintptr_t inputHandle, uintptr_t outputHandle,
-                          uintptr_t fenceHandle, int compatible) {
-    // The diagnostic remote backend uses tagged handles, not local Obj-C
-    // pointers. Never message them, including for telemetry/fallback sizing.
-    const char *remote = getenv("DXMT_REMOTE_METAL");
-    if (remote && *remote) return 0;
-    id<MTLCommandBuffer> buffer = (__bridge id<MTLCommandBuffer>)(void *)command;
-    id<MTLTexture> input = (__bridge id<MTLTexture>)(void *)inputHandle;
-    id<MTLTexture> output = (__bridge id<MTLTexture>)(void *)outputHandle;
-    BOOL encoded = NO;
-    if (atomic_load(&spatialEnabled) && !atomic_load(&cachePressure) && compatible && input && output &&
-        (input.pixelFormat == MTLPixelFormatBGRA8Unorm || input.pixelFormat == MTLPixelFormatRGBA8Unorm) &&
-        (output.pixelFormat == MTLPixelFormatBGRA8Unorm || output.pixelFormat == MTLPixelFormatRGBA8Unorm) &&
-        input.width < output.width && input.height < output.height &&
-        input.sampleCount == 1 && output.sampleCount == 1 &&
-        input.textureType == MTLTextureType2D && output.textureType == MTLTextureType2D) {
-        pthread_mutex_lock(&spatialLock);
-        NSUInteger dimensions[] = {input.width, input.height, input.pixelFormat,
-                                    output.width, output.height, output.pixelFormat};
-        if (memcmp(scalerDimensions, dimensions, sizeof(dimensions))) {
-            memcpy(scalerDimensions, dimensions, sizeof(dimensions));
-            scalerFailed = NO; spatialScaler = nil;
-        }
-        if (!spatialScaler && !scalerFailed) {
-            MTLFXSpatialScalerDescriptor *desc = [MTLFXSpatialScalerDescriptor new];
-            desc.inputWidth = input.width; desc.inputHeight = input.height;
-            desc.outputWidth = output.width; desc.outputHeight = output.height;
-            desc.colorTextureFormat = input.pixelFormat; desc.outputTextureFormat = output.pixelFormat;
-            desc.colorProcessingMode = MTLFXSpatialScalerColorProcessingModePerceptual;
-            spatialScaler = [desc newSpatialScalerWithDevice:buffer.device];
-            scalerFailed = spatialScaler == nil;
-        }
-        if (spatialScaler && (input.usage & spatialScaler.colorTextureUsage) == spatialScaler.colorTextureUsage &&
-            (output.usage & spatialScaler.outputTextureUsage) == spatialScaler.outputTextureUsage) {
-            spatialScaler.colorTexture = input; spatialScaler.outputTexture = output;
-            spatialScaler.inputContentWidth = input.width; spatialScaler.inputContentHeight = input.height;
-            spatialScaler.fence = (__bridge id<MTLFence>)(void *)fenceHandle;
-            [spatialScaler encodeToCommandBuffer:buffer];
-            encoded = YES;
-        }
-        pthread_mutex_unlock(&spatialLock);
-    }
-    if (!atomic_load(&telemetry)) return encoded;
-    pthread_mutex_lock(&samplesLock);
-    metrics.internal_width = (int)input.width; metrics.internal_height = (int)input.height;
-    metrics.output_width = (int)output.width; metrics.output_height = (int)output.height;
-    metrics.spatial_active = encoded;
-    pthread_mutex_unlock(&samplesLock);
-    return encoded;
 }
 
 static dispatch_queue_t cacheQueue(void) {
@@ -140,12 +384,11 @@ uint64_t madeira_available_memory(void) { return os_proc_available_memory(); }
 void madeira_performance_cache_pressure(int level) {
     level = MAX(0, MIN(level, 2));
     atomic_store(&cachePressure, level);
+    atomic_fetch_add(&spatialGeneration, 1);
     dispatch_async(cacheQueue(), ^{
         // Only optional renderer-owned state is released. Live game resources,
         // pipeline states and executable FEX pages remain owned by their runtime.
-        pthread_mutex_lock(&spatialLock);
-        if (level) spatialScaler = nil;
-        pthread_mutex_unlock(&spatialLock);
+        if (level) spatialPurge();
         pthread_mutex_lock(&archiveLock);
         if (level >= 2) {
             pipelineArchive = nil; archiveGeneration++;
@@ -215,6 +458,7 @@ void madeira_performance_note_generated_encode(void) {
 BOOL madeira_performance_present(id<MTLCommandBuffer> buffer,
                                  id<CAMetalDrawable> drawable, double minimum) {
     if (!buffer || !drawable) return NO;
+    spatialFinish(buffer, drawable);
     int targetFPS = atomic_load(&cap);
     if (targetFPS >= 0) {
         static _Thread_local MadeiraFrameDeadline deadline;

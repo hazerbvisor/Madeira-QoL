@@ -11,24 +11,8 @@ source, destination = map(pathlib.Path, sys.argv[1:])
 text = source.read_text()
 
 if source.name == 'dxmt_presenter.cpp':
-    text = '#include "PerformanceBridge.h"\n' + text
-    anchor = 'layer_.setProps(layer_props_);'
-    assert text.count(anchor) == 3
-    text = text.replace(anchor, '''[&] {
-      madeira_spatial_native_props(1);
-      layer_.setProps(layer_props_);
-      madeira_spatial_native_props(0);
-    }();''')
-    before = '  WMTRenderPassInfo info;\n'
-    assert text.count(before) == 1
-    text = text.replace(before, '''  // Preserve HDR, gamma and multisample semantics through the original blit.
-  if (madeira_spatial_encode(cmdbuf.handle, backbuffer.handle, drawable.texture().handle, fence.handle,
-        sample_count_ == 1 && gamma_version_ == 0 && !(WMT_COLORSPACE_IS_HDR(colorspace_)) &&
-        !(WMT_COLORSPACE_IS_HDR(display_colorspace_))))
-    return drawable;
-
-  WMTRenderPassInfo info;
-''')
+    # Native and guest rendering now converge at the drawable texture bridge.
+    # Preserve the original renderer's gamma, format conversion and MSAA resolve.
     text = text.replace('double width = layer_props_.drawable_width;', 'double width = drawable.texture().width();')
     text = text.replace('double height = layer_props_.drawable_height;', 'double height = drawable.texture().height();')
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -55,14 +39,23 @@ once('  madeira_log_present_cadence("presentDrawableAfterMinDuration", params->a
     return STATUS_SUCCESS;
   }
   madeira_log_present_cadence("presentDrawableAfterMinDuration", params->arg1);''')
-once('    layer.drawableSize = CGSizeMake(props->drawable_width, props->drawable_height);', '''    double width = props->drawable_width, height = props->drawable_height;
-    madeira_spatial_adjust_size(madeira_native_props, &width, &height);
-    layer.drawableSize = CGSizeMake(width, height);''')
-once('  const struct WMTLayerProps *props = params->arg.ptr;\n  execute_on_main(^{', '''  const struct WMTLayerProps *props = params->arg.ptr;
-  // Sample the calling renderer's marker before hopping to UIKit's main queue.
-  // Native and guest Presenters can share a layer but use different viewport code.
-  int madeira_native_props = madeira_spatial_native_props_active();
-  execute_on_main(^{''')
+once('    layer.drawableSize = CGSizeMake(props->drawable_width, props->drawable_height);', '''    madeira_spatial_layer_configure(layer, props->drawable_width, props->drawable_height);
+    layer.drawableSize = CGSizeMake(props->drawable_width, props->drawable_height);''')
+once('  params->ret = (obj_handle_t)[(id<CAMetalDrawable>)params->handle texture];',
+     '  params->ret = (obj_handle_t)madeira_spatial_drawable_texture((id<CAMetalDrawable>)params->handle);')
+once('  params->ret = (obj_handle_t)[(CAMetalLayer *)params->handle nextDrawable];',
+     '  params->ret = (obj_handle_t)madeira_spatial_next_drawable((CAMetalLayer *)params->handle);')
+once('    if (enabled) props->contents_scale = 1.0;',
+     '    if (enabled || madeira_spatial_requested()) props->contents_scale = 1.0;')
+once('  props->drawable_width = layer.drawableSize.width;', '''  props->drawable_width = layer.drawableSize.width;
+  // A guest Presenter must inherit its own viewport dimensions, not the host's
+  // enlarged output. This also applies to secondary swapchains on the same layer.
+  madeira_spatial_layer_requested_size(layer, &props->drawable_width, &props->drawable_height);''')
+once('  params->ret = (obj_handle_t)[(id<MTLCommandBuffer>)params->handle renderCommandEncoderWithDescriptor:descriptor];', '''  params->ret = (obj_handle_t)[(id<MTLCommandBuffer>)params->handle renderCommandEncoderWithDescriptor:descriptor];
+  madeira_spatial_track_encoder((id<MTLRenderCommandEncoder>)params->ret,
+      (id<MTLCommandBuffer>)params->handle, descriptor.colorAttachments[0].texture);''')
+once('      [encoder setFragmentTexture:(id<MTLTexture>)body->texture atIndex:body->index];', '''      [encoder setFragmentTexture:(id<MTLTexture>)body->texture atIndex:body->index];
+      madeira_spatial_note_backbuffer(encoder, (id<MTLTexture>)body->texture, body->index);''')
 
 for name in ['_MTLDevice_newComputePipelineState', '_MTLDevice_newRenderPipelineState', '_MTLDevice_newRenderPipelineStateVD']:
     start = text.index('static NTSTATUS\n' + name + '(')

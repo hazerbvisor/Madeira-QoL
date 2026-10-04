@@ -247,16 +247,14 @@ struct LibraryEntry: Codable, Identifiable {
 
     var displayMode: DisplayMode { display.flatMap(DisplayMode.init(rawValue:)) ?? .fit }
 
-    /// The shipped 64-bit/D3D11 and emulated i386 Presenters live in guest DLLs.
-    /// They do not call the native spatial bridge; never resize their drawable.
+    /// Native and guest DXMT Presenters share the intercepted drawable-texture
+    /// boundary. Their game resources and viewport dimensions remain unchanged.
     var spatialCompatible: Bool {
-        let route = MadeiraConfig.get("d3d9") ?? MadeiraConfig.get("env.MADEIRA_D3D9")
-            ?? ProcessInfo.processInfo.environment["MADEIRA_D3D9"] ?? "emulated"
         let remote = MadeiraConfig.get("remote") ?? MadeiraConfig.get("env.DXMT_REMOTE_METAL")
             ?? ProcessInfo.processInfo.environment["DXMT_REMOTE_METAL"] ?? ""
         return remote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && desktop != true && bits == 32 && graphicsAPI == "D3D9"
-            && route.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "native"
+            && desktop != true && (bits == 32 || bits == 64)
+            && ["D3D9", "D3D11", "D3D11/D3D9"].contains(graphicsAPI)
     }
 
     /// A lower session monitor is a request to the game, not forced scaling of

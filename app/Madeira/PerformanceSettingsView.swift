@@ -86,7 +86,7 @@ struct MadeiraFXSettings: View {
                     }
                 }
             } else if !supported {
-                Text("Spatial requires a supported device and native 32-bit Direct3D 9. D3D11, emulated D3D9 and desktop sessions retain original rendering and resolution.")
+                Text("Spatial requires a supported device and a local DXMT Direct3D 9 or 11 game. Desktop, remote Metal and other renderer paths retain original rendering and resolution.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Text("Temporal reconstruction and frame interpolation are unavailable: the presentation path does not provide trustworthy motion vectors, depth and camera jitter.")

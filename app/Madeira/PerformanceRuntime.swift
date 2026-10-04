@@ -14,7 +14,9 @@ struct PerformanceReadout {
     var thermal = "Unknown"
     var bottleneck: PerformanceBottleneck = .unknown
     var internalWidth = 0, internalHeight = 0, outputWidth = 0, outputHeight = 0
+    var presentationWidth = 0, presentationHeight = 0
     var spatialActive = false
+    var spatialStatus = 0
     var activeCap = -1
     var stalls: UInt64 = 0
     var decision: String?
@@ -182,6 +184,8 @@ final class PerformanceRuntime: ObservableObject, @unchecked Sendable {
             }
             if profile.fxMode != .off, LibraryModel.shared.activeEntry?.spatialCompatible == true,
                snapshot.spatial_active != 0, madeira_spatial_supported() != 0,
+               snapshot.internal_width > 0, snapshot.internal_height > 0,
+               snapshot.internal_width < snapshot.output_width, snapshot.internal_height < snapshot.output_height,
                let scale = scalePolicy.recommendation(signals: signals, now: now, targetFPS: max(currentCap, 30),
                     current: profile.nextLaunchScale ?? profile.renderScale, minimum: profile.minimumScale, maximum: profile.maximumScale) {
                 profile.nextLaunchScale = scale
@@ -199,7 +203,9 @@ final class PerformanceRuntime: ObservableObject, @unchecked Sendable {
         value.bottleneck = signals.bottleneck(targetFPS: max(currentCap, 30))
         value.internalWidth = Int(snapshot.internal_width); value.internalHeight = Int(snapshot.internal_height)
         value.outputWidth = Int(snapshot.output_width); value.outputHeight = Int(snapshot.output_height)
-        value.spatialActive = snapshot.spatial_active != 0; value.activeCap = Int(snapshot.effective_cap)
+        value.presentationWidth = Int(snapshot.presentation_width); value.presentationHeight = Int(snapshot.presentation_height)
+        value.spatialActive = snapshot.spatial_active != 0; value.spatialStatus = Int(snapshot.spatial_status)
+        value.activeCap = Int(snapshot.effective_cap)
         value.stalls = snapshot.stalls; value.decision = profile.lastAutoDecision
         readout = value
     }
