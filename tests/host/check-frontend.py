@@ -237,6 +237,18 @@ expect(odd.displayMode == .fit, "an unknown display mode falls back to Fit")
 let saved = try? JSONEncoder().encode(forked!)
 let again = saved.flatMap { try? JSONDecoder().decode(LibraryEntry.self, from: $0) }
 expect(again?.display == "aspect" && again?.controlSize == 1.5, "the profile encodes its display and control choices")
+var inputProfile = forked!
+inputProfile.performanceUpgrade = PerformanceProfile()
+inputProfile.performanceUpgrade?.fullscreen = false
+inputProfile.performanceUpgrade?.mouseCapture = .manual
+inputProfile.performanceUpgrade?.mouseSensitivity = 2.5
+inputProfile.display = "integer"
+let inputSaved = try! JSONEncoder().encode(inputProfile)
+let inputBack = try! JSONDecoder().decode(LibraryEntry.self, from: inputSaved)
+expect(inputBack.performanceUpgrade?.fullscreen == false && inputBack.performanceUpgrade?.mouseCapture == .manual
+       && inputBack.performanceUpgrade?.mouseSensitivity == 2.5 && inputBack.displayMode == .integer,
+       "per-executable fullscreen, capture, sensitivity and integer settings survive persistence")
+expect(forked?.performanceUpgrade == nil, "older profiles preserve original input and fullscreen defaults")
 
 // Layout: the presented rect and the touch mapping for each mode.
 let guest = CGSize(width: 1280, height: 720), view = CGRect(x: 0, y: 0, width: 844, height: 390)
@@ -266,6 +278,20 @@ let integer = GameSurfaceLayout.rect(guest: guest, bounds: view, mode: .integer,
 expect(near(integer.width * 3, guest.width) && near(integer.height * 3, guest.height), "integer scaling uses physical pixels, not UIKit points")
 let integerCenter = GameSurfaceLayout.map(point: CGPoint(x: integer.midX, y: integer.midY), guest: guest, bounds: view, mode: .integer, pixelScale: 3)
 expect(near(integerCenter.x, 640) && near(integerCenter.y, 360), "integer geometry and touch mapping agree")
+let oddBounds = CGRect(x: 0, y: 0, width: 845, height: 391)
+let oddInteger = GameSurfaceLayout.rect(guest: guest, bounds: oddBounds, mode: .integer, pixelScale: 3)
+expect(abs(oddInteger.minX * 3 - round(oddInteger.minX * 3)) < 0.001
+       && abs(oddInteger.minY * 3 - round(oddInteger.minY * 3)) < 0.001,
+       "integer centering stays on physical pixels for odd-sized viewports")
+for size in [CGSize(width: 1024, height: 1366), CGSize(width: 1366, height: 1024), CGSize(width: 520, height: 600)] {
+    let safe = CGRect(x: 24, y: 32, width: size.width - 48, height: size.height - 64)
+    let unusual = CGSize(width: 1560, height: 720)
+    let layout = GameSurfaceLayout.rect(guest: unusual, bounds: safe, mode: .fit)
+    expect(safe.contains(layout) && abs(layout.width / layout.height - unusual.width / unusual.height) < 0.001,
+           "Fit preserves unusual resolutions in portrait, landscape and resized safe-area bounds")
+    let point = GameSurfaceLayout.map(point: CGPoint(x: layout.midX, y: layout.midY), guest: unusual, bounds: safe, mode: .fit)
+    expect(near(point.x, 780) && near(point.y, 360), "safe-area presentation and input share the same origin")
+}
 
 // Controller navigation.
 let c = LibraryController.shared

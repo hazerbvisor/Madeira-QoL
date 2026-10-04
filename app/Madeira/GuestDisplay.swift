@@ -72,13 +72,20 @@ enum GameSurfaceLayout {
         let shape = useDrawable ? aspect : guest
         let sx = bounds.width / shape.width, sy = bounds.height / shape.height
         var scale = mode == .fill ? max(sx, sy) : min(sx, sy)
-        if mode == .integer, pixelScale > 0, scale * pixelScale >= 1 {
+        let integerPixels = mode == .integer && pixelScale > 0 && scale * pixelScale >= 1
+        if integerPixels {
             scale = floor(scale * pixelScale) / pixelScale
         }
         let w = shape.width * scale, h = shape.height * scale
-        return CGRect(x: bounds.minX + (bounds.width - w) / 2,
-                      y: bounds.minY + (bounds.height - h) / 2,
-                      width: w, height: h)
+        var x = bounds.minX + (bounds.width - w) / 2
+        var y = bounds.minY + (bounds.height - h) / 2
+        if integerPixels {
+            // Half-pixel centering on odd-sized displays defeats nearest
+            // scaling even when the width and height are whole multiples.
+            x = floor(x * pixelScale) / pixelScale
+            y = floor(y * pixelScale) / pixelScale
+        }
+        return CGRect(x: x, y: y, width: w, height: h)
     }
 
     /// A point in `bounds`'s coordinate space (a touch) in guest pixels for

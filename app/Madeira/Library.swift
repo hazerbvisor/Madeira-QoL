@@ -393,7 +393,9 @@ final class LibraryModel: ObservableObject {
     }
     @Published var error: String?
     @Published var sessionMessage = ""
-    @Published var launching = false
+    @Published var launching = false {
+        didSet { if oldValue != launching { HardwareInput.shared.sessionFocusChanged() } }
+    }
     @Published var overlayFields = ["FPS", "Frame time", "RAM", "Battery"]
     private var launchPresent: UInt64 = 0
     private var launchSurface: UInt64 = 0
@@ -3102,7 +3104,6 @@ struct LibraryHUD: View {
         }.ignoresSafeArea()
         .onAppear { model.saveCurrentProfile() }
         .onChange(of: model.menu) { _, open in
-            LibraryController.shared.configure(enabled: model.enabled, ownsInput: open)
             if !open { bindsPage = false }
             if !open { model.saveCurrentProfile() }
         }

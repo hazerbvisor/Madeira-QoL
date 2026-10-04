@@ -51,3 +51,45 @@ Implementation is in progress. Final phase-by-phase status, exact blockers,
 host/build results and device-only checks will be recorded here before the PR.
 ETS2 and an iOS device are not present in the Linux build environment. The
 reported 20–30 FPS at 1280×960 is the user's baseline, not a measured result here.
+
+## Phase 2 implementation and validation
+
+Phase 2 extends the existing input implementation. The branch now provides:
+
+- Fit and Fill that preserve the actual drawable aspect, explicit Stretch, and
+  nearest filtering with integer physical-pixel scaling and aligned origins.
+  Presentation and touch mapping share one geometry calculation, including
+  unusual resolutions, safe-area offsets and portrait/landscape bounds.
+- A backward-compatible per-executable fullscreen preference. Fullscreen uses
+  the available surface; disabling it respects UIKit safe-area insets and
+  restores the status bar. Safe-area changes refresh the window-level layer.
+- Per-executable automatic/manual/disabled mouse capture and sensitivity.
+  Automatic capture follows a hidden game cursor on the existing direct-mode
+  raw GCMouse path. Manual capture uses Ctrl+Alt+P. Menus, touch editing,
+  session exit, backgrounding and disconnection release capture and held
+  hardware input. UIKit-only mouse streams retain their existing fallback.
+- Existing HID keyboard down/up, modifiers, function/navigation keys, mouse
+  buttons/wheel, four-slot XInput and per-game controller mappings are retained.
+  Session UI neutralizes controller output even if frontend controller
+  navigation is disabled. Touch XInput holds are cleared on focus loss.
+- Existing editable per-game touch layouts, size, opacity and action mappings
+  are retained. Interrupted keyboard/mouse touch gestures now release their
+  old binding, including diagonal sticks, when hidden, remapped, rotated,
+  edited or backgrounded; cancellation is idempotent.
+
+Validation: production host tests cover geometry/input agreement, profile JSON
+persistence and legacy defaults, HID/PC key maps, focus edge handling, mouse
+transport, XInput packet/range/concurrency behavior, touch arbitration and
+layout persistence. A new host test executes production touch-release methods
+against interrupted keys, mouse buttons, old remaps and diagonal sticks.
+
+Device-only checks remain unverified: actual app/game launch, fullscreen and
+safe-area appearance, orientation transitions, physical mouse capture at screen
+edges, keyboard shortcuts, physical controller latency and real touch gestures.
+No iPad or ETS2 installation is connected to this Linux environment. Automatic
+mouse capture follows cursor visibility; generic Wine ClipCursor requests and
+virtual-desktop capture are not independently bridged into UIKit pointer lock.
+Apple also restricts pointer lock to compatible fullscreen iPad scenes/raw
+mouse streams. These constraints must not be presented as universal capture.
+
+Phases 3–5 remain in progress. They are not part of the Phase 2 completion claim.

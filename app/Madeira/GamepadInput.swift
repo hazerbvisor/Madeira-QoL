@@ -62,7 +62,7 @@ final class GamepadInput: @unchecked Sendable {
     @MainActor func touch(owner: UUID, control: UUID, value: GamepadSample?) {
         guard Self.touchEnabled else { return }
         queue.async { [self] in
-            guard active || value == nil else { return }
+            guard (active && gameplayFocused) || value == nil else { return }
             touchState.update(owner: owner, control: control, value: value)
             sample()
         }
@@ -102,6 +102,18 @@ final class GamepadInput: @unchecked Sendable {
     private var profiles = [GCExtendedGamepad?](repeating: nil, count: 4)
     private var timer: DispatchSourceTimer?
     private var active = false
+    private var gameplayFocused = true // queue-owned, independent of frontend navigation settings
+
+    func sessionFocusChanged(gameplay: Bool) {
+        queue.async { [self] in
+            gameplayFocused = gameplay
+            if !gameplay {
+                touchState.clear()
+                PadKeyboardMouse.shared.releaseAll("Madeira UI")
+            }
+            sample()
+        }
+    }
     private var touchState = TouchGamepadState()
     @MainActor private var observers: [NSObjectProtocol] = []
     @MainActor private var started = false
@@ -259,7 +271,7 @@ final class GamepadInput: @unchecked Sendable {
                     }
                 }
             }
-            if active && touchConnected {
+            if active && gameplayFocused && touchConnected {
                 let physical = GamepadSample(buttons: state.buttons,
                     lt: state.left_trigger, rt: state.right_trigger,
                     lx: state.lx, ly: state.ly, rx: state.rx, ry: state.ry)
@@ -267,6 +279,10 @@ final class GamepadInput: @unchecked Sendable {
                 state.buttons = merged.buttons
                 state.left_trigger = merged.lt; state.right_trigger = merged.rt
                 state.lx = merged.lx; state.ly = merged.ly; state.rx = merged.rx; state.ry = merged.ry
+            }
+            if !gameplayFocused {
+                state = winios_gamepad()
+                state.connected = 1
             }
             winios_gamepad_set_state(Int32(i), &state)
         }

@@ -577,7 +577,11 @@ final class HardwareInput: ObservableObject {
     }
 
     func sessionFocusChanged() {
-        if LibraryModel.shared.menu || LibraryModel.shared.current == nil || TouchControlsModel.shared.editing {
+        let library = LibraryModel.shared
+        let uiOwnsInput = (library.enabled && (library.current == nil || library.menu || library.launching)) || TouchControlsModel.shared.editing
+        LibraryController.shared.configure(enabled: library.enabled, ownsInput: uiOwnsInput)
+        GamepadInput.shared.sessionFocusChanged(gameplay: !uiOwnsInput)
+        if uiOwnsInput {
             setPointerLocked(false, byUs: false, why: "Madeira UI or session exit")
         }
         refreshFocus("session UI")
