@@ -148,6 +148,13 @@ A Linux cross-build with Clang 21, iPhoneOS 26.5 headers and target
 the native diagnostic compatibility headers. Their archive membership and target
 metadata were checked. This validates FEX compilation, not the macOS workflow or
 final app link.
+The next Codemagic run compiled 36 of 37 ntdll translation units, stopping at a
+non-public `rusage_info_v6` page-wait field in `server_ios.c`. That diagnostic now
+prints `pgw=n/a`; its two printf-style logging format warnings were also corrected.
+The original failure was reproduced locally, then the entire corrected source was
+cross-compiled to an ARM64 iOS Mach-O object with Clang 21, iPhoneOS 26.5 headers
+and `-Werror=format`. The full ntdll archive and subsequent app build still need
+Codemagic validation.
 
 xtool 1.20.1 was installed and executed on Linux. `xtool dev build --ipa` rejects
 the app with `Could not find Package.swift in this directory`: xtool's build command
