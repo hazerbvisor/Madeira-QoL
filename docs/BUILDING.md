@@ -1,5 +1,11 @@
 # Building Madeira from a clean checkout (reproducibility record, 2026-09-16)
 
+For the Codemagic source-bootstrap candidate, archive inventory, private inputs
+and current validation limits, see [CODEMAGIC.md](CODEMAGIC.md). The historical
+record below predates that workflow. Recursive checkout of the currently pinned
+submodules has since succeeded; macOS compilation remains unverified.
+
+
 This is the "scripts to control compilation and installation" record the
 LGPL relink obligation depends on (docs/LICENSING.md). Each step says
 whether it has been re-executed from a clean checkout. A fresh recursive

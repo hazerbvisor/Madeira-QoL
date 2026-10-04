@@ -1,0 +1,110 @@
+# Codemagic clean native build
+
+Workflow ID: `madeira-unsigned-ios` (display name: **Madeira Debug unsigned IPA**).
+It builds the generic arm64 iOS device target in Debug with signing disabled,
+then publishes `artifacts/Madeira-QoL.ipa`. Debug preserves the documented
+working guest execution configuration. No GitHub Actions or existing IPA is used.
+
+## Runner and external inputs
+
+Use Codemagic's Apple Silicon `mac_mini_m2` runner with its latest Xcode and
+Metal Toolchain component. The workflow installs Homebrew build tools and the
+Rust iOS target. Enable this repository in Codemagic and select the workflow.
+
+Supply the twelve unmodified Microsoft runtime DLLs listed in
+[tools/fetch-vcruntime.md](../tools/fetch-vcruntime.md). Set either:
+
+- `MADEIRA_VCRUNTIME_DIR`: an existing directory on a privately provisioned runner;
+- `MADEIRA_VCRUNTIME_URL` and `MADEIRA_VCRUNTIME_SHA256`: a private downloadable
+  ZIP containing those DLLs at its root, and its SHA-256 checksum. Store the URL
+  as a secure Codemagic environment variable, especially if it carries credentials.
+
+Do not upload a Madeira IPA as an input. The runtime directory is a distinct
+Microsoft dependency. These DLLs are ignored by Git and are copied unchanged.
+
+D3D12 is enabled and mandatory in this workflow. The repository already contains
+the iOS Metal Shader Converter dylib and public headers; `deps.sh` validates their
+pinned hashes. No Apple installer or additional Apple binary is committed by this
+change. For an independently provisioned private converter dependency, set
+`MADEIRA_MSC_IOS_FILE` to the runner's copy of the same pinned iOS dylib. A missing
+or mismatched converter aborts before compilation; CI explicitly sets
+`MADEIRA_ALLOW_NO_D3D12=0`. Apple's installer and host converter are unnecessary
+for this iOS path. Obtain private inputs under their respective supplier terms.
+
+Signing credentials, an Apple ID and pairing/JIT credentials are unnecessary to
+produce this unsigned IPA. They are needed later when installing/running it.
+
+## Source bootstrap and caches
+
+The recursive submodules select the exact commits recorded in Git. LLVM is fetched
+at `8dfdcc7b7bf66834a761bd8de445840ef68e4d1a`, the full revision corresponding to
+`8dfdcc7b7` in BUILDING.md. A host `llvm-tblgen` is built first. The pinned LLVM
+CMake component graph resolves the transitive dependencies of `passes`,
+`bitwriter` and `bitreader`, then only that closure is built for iOS. Optional
+zlib, zstd, libxml2 and terminfo dependencies are disabled. The resulting archive
+manifest is consumed by DXMT, which creates and indexes a new combined archive
+with Apple's `libtool`; objects with identical basenames in different LLVM
+archives are preserved. Shader AIR headers are generated from DXMT sources.
+
+Codemagic caches the LLVM source and host/iOS build directories, llvm-mingw
+release download, Cargo downloads and ccache. An SDK/Xcode/source recipe change
+invalidates LLVM products. No cache is needed for correctness: the scripts fetch,
+configure and build when the directories are empty. llvm-mingw's documented
+20260421 tarball is SHA-256 checked on **every** invocation before extraction.
+FreeType is fetched at `42608f77f20749dd6ddc9e0536788eaad70ea4b5` (2.13.3).
+The tracked GnuTLS/GMP/Nettle and FFmpeg tarballs are checksum verified.
+
+The native build order prepares Wine's host-generated config header, rebuilds
+GnuTLS/GMP/Nettle, FFmpeg, FEX iOS (including JemallocLibs), FreeType, ntdll unix,
+wineserver, win32u unix, LLVM/DXMT, and the locked Rust pairing library. Dock's
+ignored PE resource is also built with llvm-mingw. Existing tracked guest Wine,
+FEX and D3D12 PE binaries remain bundled; unused optional WoW64 components are
+not compiled as part of the static library bootstrap.
+
+## Archive inventory and early verification
+
+`build/codemagic/native-libraries.json` classifies all 20 `.a` file references
+in Madeira.xcodeproj:
+
+| Libraries | Classification | Build source |
+| --- | --- | --- |
+| FEXCore, FEXCore_Base, JemallocLibs, fmt, cephes_128bit, xxhash, softfloat_3e | built from source | pinned FEX submodules |
+| ntdll_unix, wineserver | built from source | pinned Wine with existing Madeira source replacements |
+| win32u_unix | generated/composed | pinned Wine plus FreeType 2.13.3 |
+| dxmt_combined | generated/composed | pinned DXMT plus pinned LLVM dependency closure |
+| avformat, avcodec, swresample, avutil | built from source | tracked FFmpeg 7.1.1 tarball |
+| gnutls, hogweed, nettle, gmp | tracked/prebuilt, rebuilt from source in CI | tracked release tarballs |
+| madeira_rppairing | built from source | Rust source and Cargo.lock |
+
+There are no unclassified archive references. The historical tracked
+`app/libdxmt_unix.a` is not linked by this Xcode project and is not consumed.
+Run `python3 build/codemagic/verify-link-inputs.py --audit` to print the inventory.
+Without `--audit`, it fails on every unavailable archive, printing its exact path
+and builder, validates archive membership and checks arm64 on macOS. Added or
+removed Xcode references also require updating the inventory.
+
+## Clean verification
+
+On macOS, after provisioning runtime inputs:
+
+```sh
+git submodule update --init --recursive
+bash build/codemagic/clean-native.sh
+bash build/codemagic/build-native.sh
+python3 build/codemagic/verify-link-inputs.py
+```
+
+Set `MADEIRA_CLEAN_NATIVE=1` in Codemagic to perform this deletion after cache
+restoration. It removes all required native build trees, including wineserver,
+DXMT combined/unix archives, FEX iOS, host/iOS LLVM, FreeType, Wine config,
+FFmpeg/GnuTLS outputs and Rust pairing products. It intentionally deletes the
+four tracked crypto archives locally, so they cannot mask a missing source build.
+Use an empty Codemagic cache for the first validation run; subsequent normal runs
+can reuse LLVM products. Native output deletion never alters source submodules.
+
+Validation status: recursive checkout and the actual llvm-mingw download/checksum
+were verified in Linux. Archive audit, missing-input detection and shell syntax
+can also be verified there. A full macOS native build, Xcode link, and IPA packaging
+have **not** been executed for this change. This workflow is an unverified build
+candidate until a Codemagic run completes; it must not be presented as a successful
+clean build on the basis of scripts alone.

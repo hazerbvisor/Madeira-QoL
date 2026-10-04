@@ -45,6 +45,7 @@ HOST=aarch64-apple-darwin
 JOBS=$(sysctl -n hw.ncpu)
 
 mkdir -p "$OBJ_DIR" "$PREFIX"
+(cd "$SRC_DIR" && shasum -a 256 -c SHA256SUMS)
 
 extract() { # tarball, dirname
     if [ ! -d "$OBJ_DIR/$2" ]; then

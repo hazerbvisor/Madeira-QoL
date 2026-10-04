@@ -10,6 +10,7 @@ OBJ_DIR="$BUILD_DIR/obj"
 APP_LIB="$REPO_ROOT/app/Madeira/libntdll_unix.a"
 
 mkdir -p "$OBJ_DIR"
+rm -f "$OBJ_DIR"/*.o "$OBJ_DIR/libntdll_unix.a"
 
 SUCCEEDED=0
 FAILED=0
@@ -205,6 +206,7 @@ if [ -n "$FAILED_FILES" ]; then
 fi
 
 echo ""
+[ "$FAILED" -eq 0 ] || { echo "Refusing to archive failed ntdll build" >&2; exit 1; }
 echo "=== Building libntdll_unix.a ==="
 ar rcs "$OBJ_DIR/libntdll_unix.a" \
     "$OBJ_DIR/audio_null_ios.o" "$OBJ_DIR/madsync.o" "$OBJ_DIR/nsi_unixlib_ios.o" \
@@ -221,6 +223,7 @@ ar rcs "$OBJ_DIR/libntdll_unix.a" \
     "$OBJ_DIR/tape.o" "$OBJ_DIR/thread.o" "$OBJ_DIR/virtual.o"
 
 echo "Copying to app..."
+xcrun -sdk iphoneos ranlib "$OBJ_DIR/libntdll_unix.a"
 cp "$OBJ_DIR/libntdll_unix.a" "$APP_LIB"
 echo "libntdll_unix.a: $(wc -c < "$APP_LIB" | tr -d ' ') bytes"
 echo "Done!"

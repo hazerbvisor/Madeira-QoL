@@ -1,0 +1,74 @@
+workflows:
+  madeira-unsigned-ios:
+    name: Madeira Debug unsigned IPA
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      xcode: latest
+      vars:
+        BUILD_JOBS: "8"
+        MADEIRA_CLEAN_NATIVE: "0"
+        # Configure MADEIRA_VCRUNTIME_URL and MADEIRA_VCRUNTIME_SHA256 as
+        # private environment variables in Codemagic (docs/CODEMAGIC.md).
+    cache:
+      cache_paths:
+        - $CM_BUILD_DIR/toolchains/downloads
+        - $CM_BUILD_DIR/toolchains/llvm-project
+        - $CM_BUILD_DIR/toolchains/llvm-host-build
+        - $CM_BUILD_DIR/toolchains/llvm-ios-build
+        - $HOME/.cargo/registry
+        - $HOME/.cargo/git
+        - $HOME/.ccache
+    scripts:
+      - name: Initialize pinned source submodules
+        script: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git submodule update --init --recursive
+      - name: Install build tools and iOS Rust target
+        script: |
+          set -euo pipefail
+          brew install cmake ninja ccache autoconf automake libtool bison flex pkg-config llvm rustup
+          export PATH="$(brew --prefix bison)/bin:$(brew --prefix flex)/bin:$(brew --prefix llvm)/bin:$HOME/.cargo/bin:$PATH"
+          if ! rustup show active-toolchain >/dev/null 2>&1; then
+            rustup-init -y --no-modify-path --default-toolchain stable
+          fi
+          rustup target add aarch64-apple-ios
+          xcodebuild -downloadComponent MetalToolchain
+          printf 'PATH=%s\n' "$PATH" >> "$CM_ENV"
+      - name: Build native dependencies from source
+        script: |
+          set -euo pipefail
+          if [ "$MADEIRA_CLEAN_NATIVE" = "1" ]; then
+            bash build/codemagic/clean-native.sh
+          fi
+          bash build/codemagic/build-native.sh
+      - name: Validate every Xcode static link input
+        script: |
+          set -euo pipefail
+          python3 build/codemagic/verify-link-inputs.py
+      - name: Build Debug for generic iOS device without signing
+        script: |
+          set -euo pipefail
+          mkdir -p artifacts
+          xcodebuild -project app/Madeira.xcodeproj -scheme Madeira \
+            -configuration Debug -destination 'generic/platform=iOS' \
+            -derivedDataPath "$CM_BUILD_DIR/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
+            build 2>&1 | tee artifacts/xcodebuild.log
+      - name: Package unsigned Madeira-QoL IPA
+        script: |
+          set -euo pipefail
+          APP="$CM_BUILD_DIR/DerivedData/Build/Products/Debug-iphoneos/Madeira.app"
+          test -s "$APP/Madeira"
+          STAGE=$(mktemp -d)
+          trap 'rm -rf "$STAGE"' EXIT
+          mkdir -p "$STAGE/Payload"
+          ditto "$APP" "$STAGE/Payload/Madeira.app"
+          ditto -c -k --keepParent "$STAGE/Payload" "$CM_BUILD_DIR/artifacts/Madeira-QoL.ipa"
+          unzip -t "$CM_BUILD_DIR/artifacts/Madeira-QoL.ipa"
+    artifacts:
+      - artifacts/Madeira-QoL.ipa
+      - artifacts/xcodebuild.log
+      - build/**/*.err
+      - build/**/err-*.txt

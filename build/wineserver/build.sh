@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 BUILD_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$BUILD_DIR/../.." && pwd)"
@@ -12,14 +12,10 @@ SHIMS_DIR="$REPO_ROOT/build/ntdll-unix/shims"
 OBJ_DIR="$BUILD_DIR/obj"
 mkdir -p "$OBJ_DIR"
 
-# Copy the base library if we don't have one yet
+# A base archive is always generated from this checkout, never recovered from
+# an application or another build. Partial rebuilds are allowed only after that.
 if [ ! -f "$OBJ_DIR/libwineserver.a" ]; then
-    if [ -f "$APP_LIB" ]; then
-        cp "$APP_LIB" "$OBJ_DIR/libwineserver.a"
-    else
-        echo "ERROR: No base libwineserver.a found"
-        exit 1
-    fi
+    set -- all
 fi
 
 CC_FLAGS=(
@@ -119,6 +115,32 @@ else
     echo "FAILED"; cat "$OBJ_DIR/err-kill.txt"; exit 1
 fi
 
+# Compile every upstream server translation unit not replaced by Madeira.
+# Read the pinned fork's manifest so new required objects cannot be omitted.
+if [ "${1:-all}" = all ]; then
+    rm -f "$OBJ_DIR"/*.o "$OBJ_DIR/libwineserver.a"
+    # kill wrapper was compiled with its own flags above; regenerate after clean.
+    xcrun -sdk iphoneos clang "${KILL_FLAGS[@]}" -c "$BUILD_DIR/wineserver_ios_kill.c" -o "$OBJ_DIR/wineserver_ios_kill.o"
+    python3 - "$WINE_SRC/server/Makefile.in" > "$OBJ_DIR/sources.txt" <<'PY_SOURCES'
+import pathlib, re, sys
+s = pathlib.Path(sys.argv[1]).read_text().replace("\\\n", " ")
+m = re.search(r"^SOURCES\s*=([^\n]+)", s, re.M)
+if not m:
+    sys.exit("Cannot find wineserver SOURCES manifest")
+for name in m.group(1).split():
+    if name.endswith(".c"):
+        print(name)
+PY_SOURCES
+    while IFS= read -r src; do
+        name="${src%.c}"
+        replaced=0
+        for entry in "${PATCHED_FILES[@]}"; do
+            if [ "${entry##*:}" = "$name.o" ]; then replaced=1; break; fi
+        done
+        if [ "$replaced" = 0 ]; then compile_one "$WINE_SRC/server/$src" "$name"; fi
+    done < "$OBJ_DIR/sources.txt"
+fi
+
 case "${1:-all}" in
     all)
         echo "=== Building all patched wineserver files ==="
@@ -183,6 +205,12 @@ REPLACEMENTS=(
     "inproc_sync.o:inproc_sync.o"   # ml1058
 )
 
+# Create the archive from all freshly compiled objects before applying the
+# existing replacement and symbol-rename passes.
+if [ "${1:-all}" = all ]; then
+    xcrun -sdk iphoneos ar rcs "$OBJ_DIR/libwineserver.a" "$OBJ_DIR"/*.o
+fi
+
 for entry in "${REPLACEMENTS[@]}"; do
     new_obj="${entry%%:*}"
     old_obj="${entry##*:}"
@@ -243,5 +271,6 @@ rm -rf "$TMP_RENAME_DIR"
 echo "  symbol rename + repack OK"
 
 echo "Copying to app..."
+xcrun -sdk iphoneos ranlib "$OBJ_DIR/libwineserver.a"
 cp "$OBJ_DIR/libwineserver.a" "$APP_LIB"
 echo "Done! libwineserver.a: $(wc -c < "$APP_LIB" | tr -d ' ') bytes"

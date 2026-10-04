@@ -1,0 +1,82 @@
+{
+  "FEX/build-ios/FEXCore/Source/libFEXCore.a": {
+    "classification": "built from source",
+    "builder": "build/fex-ios/build.sh"
+  },
+  "FEX/build-ios/FEXCore/Source/libFEXCore_Base.a": {
+    "classification": "built from source",
+    "builder": "build/fex-ios/build.sh"
+  },
+  "FEX/build-ios/External/fmt/libfmt.a": {
+    "classification": "built from source",
+    "builder": "build/fex-ios/build.sh"
+  },
+  "FEX/build-ios/External/cephes/libcephes_128bit.a": {
+    "classification": "built from source",
+    "builder": "build/fex-ios/build.sh"
+  },
+  "FEX/build-ios/External/xxhash/cmake_unofficial/libxxhash.a": {
+    "classification": "built from source",
+    "builder": "build/fex-ios/build.sh"
+  },
+  "FEX/build-ios/External/SoftFloat-3e/libsoftfloat_3e.a": {
+    "classification": "built from source",
+    "builder": "build/fex-ios/build.sh"
+  },
+  "FEX/build-ios/FEXCore/Source/libJemallocLibs.a": {
+    "classification": "built from source",
+    "builder": "build/fex-ios/build.sh"
+  },
+  "app/Madeira/libwineserver.a": {
+    "classification": "built from source",
+    "builder": "build/wineserver/build.sh"
+  },
+  "app/Madeira/libntdll_unix.a": {
+    "classification": "built from source",
+    "builder": "build/ntdll-unix/build.sh"
+  },
+  "app/Madeira/libmadeira_rppairing.a": {
+    "classification": "built from source",
+    "builder": "build/rppairing-ios/build.sh"
+  },
+  "app/Madeira/libdxmt_combined.a": {
+    "classification": "generated/composed",
+    "builder": "build/llvm-ios/build.sh + build/dxmt-ios/build.sh"
+  },
+  "app/Madeira/libwin32u_unix.a": {
+    "classification": "generated/composed",
+    "builder": "build/freetype-ios/build.sh + build/win32u-unix/build.sh"
+  },
+  "app/Madeira/libgnutls.a": {
+    "classification": "tracked/prebuilt",
+    "builder": "build/gnutls-ios/build.sh (CI rebuilds tracked archives)"
+  },
+  "app/Madeira/libhogweed.a": {
+    "classification": "tracked/prebuilt",
+    "builder": "build/gnutls-ios/build.sh (CI rebuilds tracked archives)"
+  },
+  "app/Madeira/libnettle.a": {
+    "classification": "tracked/prebuilt",
+    "builder": "build/gnutls-ios/build.sh (CI rebuilds tracked archives)"
+  },
+  "app/Madeira/libgmp.a": {
+    "classification": "tracked/prebuilt",
+    "builder": "build/gnutls-ios/build.sh (CI rebuilds tracked archives)"
+  },
+  "app/Madeira/libavformat.a": {
+    "classification": "built from source",
+    "builder": "build/ffmpeg/build.sh"
+  },
+  "app/Madeira/libavcodec.a": {
+    "classification": "built from source",
+    "builder": "build/ffmpeg/build.sh"
+  },
+  "app/Madeira/libswresample.a": {
+    "classification": "built from source",
+    "builder": "build/ffmpeg/build.sh"
+  },
+  "app/Madeira/libavutil.a": {
+    "classification": "built from source",
+    "builder": "build/ffmpeg/build.sh"
+  }
+}

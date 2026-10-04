@@ -18,6 +18,7 @@ OBJ_DIR="$BUILD_DIR/obj"
 APP_LIB="$REPO_ROOT/app/Madeira/libwin32u_unix.a"
 
 mkdir -p "$OBJ_DIR"
+rm -f "$OBJ_DIR"/*.o "$OBJ_DIR/libwin32u_unix.a"
 
 SUCCEEDED=0
 FAILED=0
@@ -144,14 +145,17 @@ ar rcs "$OBJ_DIR/libwin32u_unix.a" "$OBJ_DIR"/*.o
 
 # Merge the static freetype so the app link needs no project changes.
 if [ -f "$FREETYPE_DIR/build/libfreetype.a" ]; then
-    libtool -static -o "$OBJ_DIR/libwin32u_unix.a" \
-        "$OBJ_DIR/libwin32u_unix.a" "$FREETYPE_DIR/build/libfreetype.a" 2>/dev/null
+    xcrun -sdk iphoneos libtool -static -o "$OBJ_DIR/libwin32u_merged.a" \
+        "$OBJ_DIR/libwin32u_unix.a" "$FREETYPE_DIR/build/libfreetype.a"
+    mv "$OBJ_DIR/libwin32u_merged.a" "$OBJ_DIR/libwin32u_unix.a"
     echo "merged libfreetype.a"
 else
-    echo "WARNING: no libfreetype.a — fonts will be disabled"
+    echo "ERROR: missing $FREETYPE_DIR/build/libfreetype.a; run build/freetype-ios/build.sh" >&2
+    exit 1
 fi
 
 echo "Copying to app..."
+xcrun -sdk iphoneos ranlib "$OBJ_DIR/libwin32u_unix.a"
 cp "$OBJ_DIR/libwin32u_unix.a" "$APP_LIB"
 echo "libwin32u_unix.a: $(wc -c < "$APP_LIB" | tr -d ' ') bytes"
 echo "Done!"
