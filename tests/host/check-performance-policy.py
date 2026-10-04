@@ -72,6 +72,11 @@ auto.automaticPerformance = false
 assert(auto.initialFPSCap == 60 && auto.requestedRenderScale == 1)
 let huge = auto.internalResolution(outputWidth: Int.max, outputHeight: Int.max)
 assert(huge.width == Int.max && huge.height == Int.max)
+auto.fxMode = .performance; auto.renderScale = 0.5
+let wide = auto.internalResolution(outputWidth: 4096, outputHeight: 240)
+assert(wide.width == 4096 && wide.height == 240)
+let tall = auto.internalResolution(outputWidth: 320, outputHeight: 4096)
+assert(tall.width == 320 && tall.height == 4096)
 // An absent upgrade field must leave a legacy library profile unchanged.
 struct LegacyEnvelope: Codable { var fpsMode: Int; var performanceUpgrade: PerformanceProfile? }
 let legacy = try decoder.decode(LegacyEnvelope.self, from: Data("{\"fpsMode\":3}".utf8))

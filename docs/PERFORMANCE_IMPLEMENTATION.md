@@ -266,3 +266,29 @@ Synthetic deadline/policy tests demonstrate correctness, not gaming performance.
 No improvement number is claimed. Test ETS2 on an iPad with the same game scene
 and settings, compare cold/warm launch, keep native submissions and visible FPS
 separate, and record at least a sustained session for thermal/memory behavior.
+
+### Final build and delivery
+
+The final app and JIT helper release build passed in **129.61 seconds** using
+xtool 1.20.1, Swift 6.3.3 and the actual iPhoneOS 26.5 SDK on Linux. Affected
+native winemetal and Presenter objects were rebuilt. All 13 host suites passed:
+frontend/profile/geometry, hardware input, gamepad transport, touch gamepad,
+control layouts, input cancellation, frame deadlines/profile migration,
+adaptive policy, runtime lifecycle, reconstruction policy, reconstruction
+provider contracts, SQLite cache fallback and spatial caller routing.
+
+Final edge-case checks cover preserving aspect ratios at minimum internal
+dimensions, enforcing the native output target when UIKit display scale already
+enlarged the drawable, and gating controller keyboard/mouse emulation with its
+input queue's focus state. Unknown guest internal dimensions display as
+unavailable. Existing toolchain/baseline warnings remain; no introduced compiler
+errors or performance/reconstruction source warnings were found.
+
+The compressed deliverable is `dist/Madeira-performance-unsigned.ipa`, with
+adjacent `.build.json` provenance and `.ipa.sha256`. Its packaging verifier checks
+ZIP integrity, all 1,075 reference resource hashes, arm64 iOS executable load
+commands, deployment targets, executable permissions and bundled dependencies.
+The app retains its iOS 17 minimum and the existing JIT helper its iOS 26 minimum.
+This is an unsigned package: installation, app/game launch and performance on a
+physical device remain unverified. PR #2 contains the complete review branch;
+main was not changed.

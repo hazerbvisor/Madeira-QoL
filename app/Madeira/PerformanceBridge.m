@@ -56,7 +56,9 @@ void madeira_spatial_adjust_size(int native, double *width, double *height) {
     double factor = MIN((double)atomic_load(&outputWidth) / *width,
                         (double)atomic_load(&outputHeight) / *height);
     // Preserve unusual swapchain aspect ratios; never resize the game's resources.
-    if (factor > 1 && factor <= 4) { *width = round(*width * factor); *height = round(*height * factor); }
+    // Native D3D9 may already multiply the window by UIKit's contentsScale.
+    // The explicit output target must also replace that oversized drawable.
+    if (factor > 0 && factor <= 4) { *width = round(*width * factor); *height = round(*height * factor); }
 }
 
 int madeira_spatial_encode(uintptr_t command, uintptr_t inputHandle, uintptr_t outputHandle,

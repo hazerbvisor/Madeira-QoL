@@ -87,10 +87,13 @@ struct PerformanceProfile: Codable, Equatable {
     }
     var requestedRenderScale: Double { automaticPerformance ? (nextLaunchScale ?? renderScale) : renderScale }
     func internalResolution(outputWidth: Int, outputHeight: Int) -> (width: Int, height: Int) {
-        guard (1...8192).contains(outputWidth), (1...8192).contains(outputHeight) else {
+        guard (320...8192).contains(outputWidth), (240...8192).contains(outputHeight) else {
             return (outputWidth, outputHeight) // invalid external profile; avoid an overflowing conversion
         }
-        let scale = fxMode == .off ? 1 : requestedRenderScale
+        // Minimum dimensions must increase both axes' scale together; clamping
+        // width/height independently would distort unusual monitor shapes.
+        let requested = fxMode == .off ? 1 : requestedRenderScale
+        let scale = min(1, max(requested, 320 / Double(outputWidth), 240 / Double(outputHeight)))
         return (max(320, Int((Double(outputWidth) * scale).rounded())),
                 max(240, Int((Double(outputHeight) * scale).rounded())))
     }

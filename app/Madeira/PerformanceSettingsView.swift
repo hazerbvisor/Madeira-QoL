@@ -68,9 +68,11 @@ struct MadeiraFXSettings: View {
                 if profile.minimumScale < profile.maximumScale {
                     Slider(value: Binding(get: { profile.renderScale }, set: { profile.renderScale = $0; profile.nextLaunchScale = nil }), in: profile.minimumScale...profile.maximumScale) { Text("Internal render scale") }
                 }
-                Text("Requested internal: \(internalResolution) · Output target: \(outputResolution.replacingOccurrences(of: "x", with: "×")) · \(Int(profile.requestedRenderScale * 100))%")
+                Text("Requested internal: \(internalResolution) · Output target: \(outputResolution.replacingOccurrences(of: "x", with: "×")) · Scale setting: \(Int(profile.requestedRenderScale * 100))%")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("The game must honor the lower session resolution. Actual dimensions and active upscaling appear in diagnostics. Changes apply at the next launch.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Minimum monitor dimensions can raise the effective scale to preserve unusual aspect ratios.")
                     .font(.caption).foregroundStyle(.secondary)
                 if profile.automaticPerformance {
                     Slider(value: Binding(get: { profile.minimumScale }, set: { profile.minimumScale = $0; profile.normalize() }), in: 0.5...1) { Text("Minimum recommended scale") }

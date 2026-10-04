@@ -261,7 +261,7 @@ final class GamepadInput: @unchecked Sendable {
                         // connect it below).
                         PadKeyboardMouse.shared.feed(buttons: state.buttons, lt: state.left_trigger, rt: state.right_trigger,
                                                      lx: state.lx, ly: state.ly, rx: state.rx, ry: state.ry,
-                                                     bindings: kbm, focused: HardwareInput.shared.baseFocused)
+                                                     bindings: kbm, focused: gameplayFocused && HardwareInput.shared.baseFocused)
                         guard touchConnected else {
                             winios_gamepad_set_state(Int32(i), nil)
                             continue

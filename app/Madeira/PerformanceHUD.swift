@@ -39,7 +39,8 @@ struct LibraryMetrics: View {
             lines.append(value.frameMS > 0 ? String(format: "Submit intervals: %.1f avg · %.1f p95 · %.1f max ms", value.frameMS, value.p95MS, value.maxMS) : "Submit intervals: unavailable")
         }
         if fields.contains("Graphics") {
-            let dimensions = value.internalWidth > 0 ? "\(value.internalWidth)×\(value.internalHeight) → \(value.outputWidth)×\(value.outputHeight)" : "Resolution: awaiting renderer"
+            let dimensions = value.internalWidth > 0 ? "\(value.internalWidth)×\(value.internalHeight) → \(value.outputWidth)×\(value.outputHeight)"
+                : (value.outputWidth > 0 ? "Internal: unavailable · Output \(value.outputWidth)×\(value.outputHeight)" : "Render dimensions: unavailable")
             let scale = value.outputWidth > 0 && value.internalWidth > 0 ? String(format: " · %.0f%% actual", Double(value.internalWidth) / Double(value.outputWidth) * 100) : ""
             let requested = library.activeEntry?.performanceUpgrade?.fxMode ?? .off
             let state = value.spatialActive ? "Spatial active" : (requested == .off ? "Off" : "Original blit (fallback)")

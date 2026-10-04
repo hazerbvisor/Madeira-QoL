@@ -34,7 +34,8 @@ int main(void) {
     madeira_spatial_native_props(0); madeira_spatial_native_props(0);
     assert(!madeira_spatial_native_props_active());
     madeira_spatial_adjust_size(before_main_hop, &w, &h); assert(w==1280 && h==960);
-    w=1560;h=720;madeira_spatial_adjust_size(1,&w,&h);assert(w==1560 && h==720);
+    w=1560;h=720;madeira_spatial_adjust_size(1,&w,&h);assert(w==1280 && h==591);
+    w=2560;h=1920;madeira_spatial_adjust_size(1,&w,&h);assert(w==1280 && h==960);
     w=0;h=480;madeira_spatial_adjust_size(1,&w,&h);assert(w==0 && h==480);
     w=NAN;h=480;madeira_spatial_adjust_size(1,&w,&h);assert(isnan(w) && h==480);
     atomic_store(&spatialEnabled,0);w=640;h=480;
