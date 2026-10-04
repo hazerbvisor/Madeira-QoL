@@ -39,7 +39,7 @@ CXX_FLAGS="-std=c++20 -fno-exceptions -fno-rtti"
 # (winemetal_unix.c:5084), so point it at the real symbol on the command line
 # rather than editing either file.
 MADEIRA_DEFS="-DDXMT_NATIVE=1 -DDXMT_MADEIRA=1 -DDXMT_IOS=1 -DDXMT_PAGE_SIZE=4096 -DNOMINMAX"
-MADEIRA_INCLUDES="-I$DXMT_SRC/nativemetal -I$DXMT_ROOT/include -I$DXMT_ROOT/libs \
+MADEIRA_INCLUDES="-I$REPO_ROOT/app/Madeira -I$DXMT_SRC/nativemetal -I$DXMT_ROOT/include -I$DXMT_ROOT/libs \
  -I$DXMT_SRC/winemetal -I$DXMT_SRC/airconv -I$DXMT_SRC/util -I$DXMT_SRC/dxmt \
  -I$DXMT_SRC/d3d9 -I$DXMT_SRC/d3d9/unix -I$DXMT_SRC/d3d9shim"
 # The frontend throws (MTLD3DError) and the imported code uses dynamic_cast,
@@ -269,7 +269,12 @@ for cpp in dxmt_format.cpp dxmt_names.cpp dxmt_command_queue.cpp dxmt_command.cp
            dxmt_resource_initializer.cpp dxmt_mem_census.cpp dxmt_bcn.cpp \
            dxmt_shader_cache.cpp; do
     name=$(basename "$cpp" .cpp)
-    compile_madeira_cxx "$DXMT_SRC/dxmt/$cpp" "$name"
+    if [ "$cpp" = dxmt_presenter.cpp ]; then
+        python3 "$BUILD_DIR/performance-overlay.py" "$DXMT_SRC/dxmt/$cpp" "$OBJ_DIR/performance/$cpp"
+        compile_madeira_cxx "$OBJ_DIR/performance/$cpp" "$name"
+    else
+        compile_madeira_cxx "$DXMT_SRC/dxmt/$cpp" "$name"
+    fi
 done
 
 echo "=== MADEIRA: dxmt_madeira_native -- d3d9 frontend ==="

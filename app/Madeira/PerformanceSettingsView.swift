@@ -39,7 +39,44 @@ struct PerformanceProfileSettings: View {
             Text("Capture releases when you open Madeira menus, edit touch controls, leave the game, or background the app. Pointer lock requires a raw mouse stream and a fullscreen iPad scene.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+        MadeiraFXSettings(profile: profile, outputResolution: entry.resolution, desktop: entry.desktop == true)
         RendererCacheSettings(entry: entry)
+    }
+}
+
+struct MadeiraFXSettings: View {
+    @Binding var profile: PerformanceProfile
+    var outputResolution: String
+    var desktop: Bool
+    private var supported: Bool { !desktop && madeira_spatial_supported() != 0 }
+    var body: some View {
+        Section("MadeiraFX") {
+            Picker("Spatial preset", selection: Binding(get: { profile.fxMode }, set: {
+                profile.fxMode = $0; profile.renderScale = $0.recommendedScale; profile.normalize()
+            })) {
+                ForEach(MadeiraFXMode.allCases, id: \.self) { Text($0.label).tag($0) }
+            }.disabled(!supported)
+            if supported && profile.fxMode != .off {
+                Slider(value: $profile.renderScale, in: profile.minimumScale...profile.maximumScale) { Text("Internal render scale") }
+                Text("Requested internal: \(internalResolution) · Output target: \(outputResolution.replacingOccurrences(of: "x", with: "×")) · \(Int(profile.renderScale * 100))%")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("The game must honor the lower session resolution. Actual dimensions and active upscaling appear in diagnostics. Changes apply at the next launch.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if !supported {
+                Text("MetalFX Spatial is unavailable for this device or desktop session. Original rendering and resolution are retained.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Text("Temporal reconstruction and frame interpolation are unavailable: the presentation path does not provide trustworthy motion vectors, depth and camera jitter.")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("Live dynamic internal resolution requires game support. Auto can recommend a scale for the next launch; it does not resize the game’s live render targets.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+    private var internalResolution: String {
+        let size = outputResolution.split(separator: "x").compactMap { Int($0) }
+        guard size.count == 2 else { return "Unknown" }
+        let result = profile.internalResolution(outputWidth: size[0], outputHeight: size[1])
+        return "\(result.width)×\(result.height)"
     }
 }
 

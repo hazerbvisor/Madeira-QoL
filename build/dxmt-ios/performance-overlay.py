@@ -10,6 +10,24 @@ import sys
 source, destination = map(pathlib.Path, sys.argv[1:])
 text = source.read_text()
 
+if source.name == 'dxmt_presenter.cpp':
+    text = '#include "PerformanceBridge.h"\n' + text
+    before = '  WMTRenderPassInfo info;\n'
+    assert text.count(before) == 1
+    text = text.replace(before, '''  // Preserve HDR, gamma and multisample semantics through the original blit.
+  if (madeira_spatial_encode(cmdbuf.handle, backbuffer.handle, drawable.texture().handle, fence.handle,
+        sample_count_ == 1 && gamma_version_ == 0 && !(WMT_COLORSPACE_IS_HDR(colorspace_)) &&
+        !(WMT_COLORSPACE_IS_HDR(display_colorspace_))))
+    return drawable;
+
+  WMTRenderPassInfo info;
+''')
+    text = text.replace('double width = layer_props_.drawable_width;', 'double width = drawable.texture().width();')
+    text = text.replace('double height = layer_props_.drawable_height;', 'double height = drawable.texture().height();')
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(text)
+    sys.exit(0)
+
 def once(old, new):
     global text
     if text.count(old) != 1:
@@ -30,6 +48,9 @@ once('  madeira_log_present_cadence("presentDrawableAfterMinDuration", params->a
     return STATUS_SUCCESS;
   }
   madeira_log_present_cadence("presentDrawableAfterMinDuration", params->arg1);''')
+once('    layer.drawableSize = CGSizeMake(props->drawable_width, props->drawable_height);', '''    double width = props->drawable_width, height = props->drawable_height;
+    madeira_spatial_adjust_size(&width, &height);
+    layer.drawableSize = CGSizeMake(width, height);''')
 
 for name in ['_MTLDevice_newComputePipelineState', '_MTLDevice_newRenderPipelineState', '_MTLDevice_newRenderPipelineStateVD']:
     start = text.index('static NTSTATUS\n' + name + '(')

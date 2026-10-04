@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <mach/mach_time.h>
 #include <stdlib.h>
+#import <MetalFX/MetalFX.h>
 
 static _Atomic int cap = -1, telemetry, connected;
 static pthread_mutex_t samplesLock = PTHREAD_MUTEX_INITIALIZER;
@@ -16,6 +17,79 @@ static NSString *archivePath;
 static id<MTLBinaryArchive> pipelineArchive;
 static uint64_t archiveGeneration;
 static BOOL archiveDirty, saveScheduled;
+static _Atomic int spatialEnabled, outputWidth, outputHeight;
+static pthread_mutex_t spatialLock = PTHREAD_MUTEX_INITIALIZER;
+static id<MTLFXSpatialScaler> spatialScaler;
+static NSUInteger scalerDimensions[6];
+static BOOL scalerFailed;
+
+int madeira_spatial_supported(void) {
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    return madeira_performance_renderer_available() && device &&
+        [MTLFXSpatialScalerDescriptor supportsDevice:device];
+}
+
+int madeira_spatial_configure(int enabled, int width, int height) {
+    BOOL supported = enabled && width >= 320 && height >= 240 && width <= 8192 && height <= 8192 && madeira_spatial_supported();
+    atomic_store(&spatialEnabled, supported);
+    atomic_store(&outputWidth, width); atomic_store(&outputHeight, height);
+    pthread_mutex_lock(&spatialLock);
+    spatialScaler = nil; memset(scalerDimensions, 0, sizeof(scalerDimensions)); scalerFailed = NO;
+    pthread_mutex_unlock(&spatialLock);
+    return supported;
+}
+
+void madeira_spatial_adjust_size(double *width, double *height) {
+    if (!atomic_load(&spatialEnabled) || !width || !height || *width <= 0 || *height <= 0) return;
+    double factor = MIN((double)atomic_load(&outputWidth) / *width,
+                        (double)atomic_load(&outputHeight) / *height);
+    // Preserve unusual swapchain aspect ratios; never resize the game's resources.
+    if (factor > 1 && factor <= 4) { *width = round(*width * factor); *height = round(*height * factor); }
+}
+
+int madeira_spatial_encode(uintptr_t command, uintptr_t inputHandle, uintptr_t outputHandle,
+                          uintptr_t fenceHandle, int compatible) {
+    id<MTLCommandBuffer> buffer = (__bridge id<MTLCommandBuffer>)(void *)command;
+    id<MTLTexture> input = (__bridge id<MTLTexture>)(void *)inputHandle;
+    id<MTLTexture> output = (__bridge id<MTLTexture>)(void *)outputHandle;
+    BOOL encoded = NO;
+    if (atomic_load(&spatialEnabled) && compatible && input && output &&
+        input.width < output.width && input.height < output.height &&
+        input.sampleCount == 1 && output.sampleCount == 1 &&
+        input.textureType == MTLTextureType2D && output.textureType == MTLTextureType2D) {
+        pthread_mutex_lock(&spatialLock);
+        NSUInteger dimensions[] = {input.width, input.height, input.pixelFormat,
+                                    output.width, output.height, output.pixelFormat};
+        if (memcmp(scalerDimensions, dimensions, sizeof(dimensions))) {
+            memcpy(scalerDimensions, dimensions, sizeof(dimensions));
+            scalerFailed = NO; spatialScaler = nil;
+        }
+        if (!spatialScaler && !scalerFailed) {
+            MTLFXSpatialScalerDescriptor *desc = [MTLFXSpatialScalerDescriptor new];
+            desc.inputWidth = input.width; desc.inputHeight = input.height;
+            desc.outputWidth = output.width; desc.outputHeight = output.height;
+            desc.colorTextureFormat = input.pixelFormat; desc.outputTextureFormat = output.pixelFormat;
+            desc.colorProcessingMode = MTLFXSpatialScalerColorProcessingModePerceptual;
+            spatialScaler = [desc newSpatialScalerWithDevice:buffer.device];
+            scalerFailed = spatialScaler == nil;
+        }
+        if (spatialScaler && (input.usage & spatialScaler.colorTextureUsage) == spatialScaler.colorTextureUsage &&
+            (output.usage & spatialScaler.outputTextureUsage) == spatialScaler.outputTextureUsage) {
+            spatialScaler.colorTexture = input; spatialScaler.outputTexture = output;
+            spatialScaler.inputContentWidth = input.width; spatialScaler.inputContentHeight = input.height;
+            spatialScaler.fence = (__bridge id<MTLFence>)(void *)fenceHandle;
+            [spatialScaler encodeToCommandBuffer:buffer];
+            encoded = YES;
+        }
+        pthread_mutex_unlock(&spatialLock);
+    }
+    pthread_mutex_lock(&samplesLock);
+    metrics.internal_width = (int)input.width; metrics.internal_height = (int)input.height;
+    metrics.output_width = (int)output.width; metrics.output_height = (int)output.height;
+    metrics.spatial_active = encoded;
+    pthread_mutex_unlock(&samplesLock);
+    return encoded;
+}
 
 static dispatch_queue_t cacheQueue(void) {
     static dispatch_once_t once;

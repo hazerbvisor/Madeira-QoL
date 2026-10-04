@@ -247,6 +247,17 @@ struct LibraryEntry: Codable, Identifiable {
 
     var displayMode: DisplayMode { display.flatMap(DisplayMode.init(rawValue:)) ?? .fit }
 
+    /// A lower session monitor is a request to the game, not forced scaling of
+    /// its render targets. Games may choose another mode; telemetry reports it.
+    var sessionResolution: String {
+        guard desktop != true, let profile = performanceUpgrade, profile.fxMode != .off,
+              madeira_spatial_supported() != 0 else { return resolution }
+        let size = resolution.split(separator: "x").compactMap { Int($0) }
+        guard size.count == 2 else { return resolution }
+        let internalSize = profile.internalResolution(outputWidth: size[0], outputHeight: size[1])
+        return "\(internalSize.width)x\(internalSize.height)"
+    }
+
     var launchArguments: String {
         if desktop == true { return "/desktop=shell,\(resolution) C:\\windows\\system32\\services.exe" }
         if startsSteamGameDirectly { return steamProgramArguments ?? "" }
@@ -322,13 +333,17 @@ struct LibraryEntry: Codable, Identifiable {
             setenv("MADEIRA_FASTSYNC", fastSync == false ? "0" : mode, 1)
             setenv("MADEIRA_FASTSYNC_SEM", semaphoreFastPath == true ? "1" : "0", 1)
         }
-        madeira_set_vsync_locked(effectiveFPSMode)
+        madeira_set_vsync_locked(performanceUpgrade?.fpsCap == nil ? effectiveFPSMode : 0)
         fputs("[frontend] launch profile applied\n", stderr)
         LogStore.shared.log("[display-shape] resolution=\(resolution) mode=\(displayMode.rawValue)")
     }
 
     /// What the bridge starts. Set on the main thread before the session begins.
     func configureLaunch() {
+        let size = resolution.split(separator: "x").compactMap { Int($0) }
+        let fx = desktop != true && performanceUpgrade?.fxMode != nil && performanceUpgrade?.fxMode != .off
+        let spatial = madeira_spatial_configure(fx ? 1 : 0, Int32(size.first ?? 0), Int32(size.count == 2 ? size[1] : 0)) != 0
+        if spatial { setenv("DXMT_METALFX_SPATIAL_SWAPCHAIN", "0", 1) } // avoid two independent upscalers
         // "The game"'s identity and working folder for this launch only (the bridge
         // reads and clears them); every other launch starts without them.
         unsetenv("MADEIRA_STEAM_APPID"); unsetenv("MADEIRA_STEAM_APPPATH"); unsetenv("MADEIRA_WORKDIR")
@@ -337,7 +352,7 @@ struct LibraryEntry: Codable, Identifiable {
             // the virtual monitor follows this entry's Resolution, as below. "The game" starts
             // its own program below, like any library game.
             if !startsSteamGameDirectly {
-                GuestDisplay.configureSessionDefault(view: CGSize(width: 1280, height: 720), knob: resolution)
+                GuestDisplay.configureSessionDefault(view: CGSize(width: 1280, height: 720), knob: sessionResolution)
                 return
             }
         }
@@ -354,7 +369,7 @@ struct LibraryEntry: Codable, Identifiable {
         // Every session's virtual monitor takes this entry's Resolution
         // (MADEIRA_SCREEN_W/H, source "knob"); for the Desktop entry it is the
         // same size as its /desktop= argument.
-        GuestDisplay.configureSessionDefault(view: CGSize(width: 1280, height: 720), knob: resolution)
+        GuestDisplay.configureSessionDefault(view: CGSize(width: 1280, height: 720), knob: sessionResolution)
     }
 }
 

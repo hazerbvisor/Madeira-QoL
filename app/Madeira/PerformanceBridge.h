@@ -19,6 +19,11 @@ void madeira_performance_set_cap(int cap);
 void madeira_performance_set_telemetry(int enabled);
 void madeira_performance_note_shader(double elapsed_ms);
 int madeira_performance_renderer_available(void);
+int madeira_spatial_supported(void);
+int madeira_spatial_configure(int enabled, int width, int height);
+void madeira_spatial_adjust_size(double *width, double *height);
+int madeira_spatial_encode(uintptr_t buffer, uintptr_t input, uintptr_t output,
+                           uintptr_t fence, int compatible);
 void madeira_performance_renderer_connected(void);
 
 #ifdef __OBJC__

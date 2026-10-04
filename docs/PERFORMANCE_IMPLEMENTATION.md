@@ -103,3 +103,27 @@ hardware input, gamepad transport, touch gamepad, control presets, performance
 policy/frame deadlines and interrupted touch input. Existing compiler/linker
 warnings remain; no compile error remains in the Phase 2 changes. The unsigned
 IPA still needs signing/installing and on-device runtime checks listed above.
+
+## Phase 3 — spatial upscaling
+
+MadeiraFX Off/Quality/Balanced/Performance/Auto requests a lower session monitor
+and explicitly distinguishes requested internal resolution from output. The
+shared native DXMT Presenter encodes public MetalFX Spatial on the same game
+command buffer with the existing fence. Scalers are reused by dimension/format,
+capability checked and allocation/usage failure falls back to the original blit.
+HDR, gamma and MSAA retain the original path. A game can override the requested
+monitor; its actual texture dimensions are authoritative. No extra history or
+presentation queue is allocated. The upstream opt-in spatial swapchain is
+suppressed while this path is requested to avoid double upscaling/asserts.
+
+Phase 3 release compilation/link/package passed (125.00 seconds), with native
+winemetal and Presenter rebuilt and unsupported-device resolution fallback
+covered by a production profile test. Actual MetalFX image output, texture
+usage compatibility and game behavior require device validation.
+
+Live dynamic internal resolution is blocked by the game-owned render targets:
+no generic DXMT present callback can make the game recreate them. The adaptive
+policy produces bounded, gradual next-launch advice with sustained overload and
+headroom windows. It is explicitly not marketed as live DRS. Temporal remains
+disabled: no coherent motion vectors, depth, camera jitter or exposure/history
+are provided at the common presentation boundary.

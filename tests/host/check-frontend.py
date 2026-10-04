@@ -97,6 +97,8 @@ enum ControlAction: Codable, Equatable, Hashable { case none }   // LibraryEntry
 enum GamepadInput { static let keyboardMouseAvailable = true }   // LibraryEntry's per-game DirectInput choice
 enum LibraryError: LocalizedError { case message(String) }
 enum RendererCaches { static func prepare(_ entry: LibraryEntry) {} }
+func madeira_spatial_supported() -> Int32 { 0 }
+func madeira_spatial_configure(_ enabled: Int32, _ width: Int32, _ height: Int32) -> Int32 { 0 }
 func env(_ name: String) -> String? { getenv(name).map { String(cString: $0) } }
 '''
 swift += (root / 'app/Madeira/PerformancePolicy.swift').read_text() + '\n'
@@ -249,6 +251,11 @@ expect(inputBack.performanceUpgrade?.fullscreen == false && inputBack.performanc
        && inputBack.performanceUpgrade?.mouseSensitivity == 2.5 && inputBack.displayMode == .integer,
        "per-executable fullscreen, capture, sensitivity and integer settings survive persistence")
 expect(forked?.performanceUpgrade == nil, "older profiles preserve original input and fullscreen defaults")
+var unsupportedFX = inputProfile
+unsupportedFX.performanceUpgrade?.fxMode = .quality
+unsupportedFX.performanceUpgrade?.renderScale = 0.85
+expect(unsupportedFX.sessionResolution == unsupportedFX.resolution,
+       "unsupported MetalFX retains the original session resolution")
 
 // Layout: the presented rect and the touch mapping for each mode.
 let guest = CGSize(width: 1280, height: 720), view = CGRect(x: 0, y: 0, width: 844, height: 390)
