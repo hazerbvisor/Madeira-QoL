@@ -249,13 +249,25 @@ struct LibraryEntry: Codable, Identifiable {
 
     /// Native and guest DXMT Presenters share the intercepted drawable-texture
     /// boundary. Their game resources and viewport dimensions remain unchanged.
-    var spatialCompatible: Bool {
+    var spatialCompatibilityIssue: String? {
         let remote = MadeiraConfig.get("remote") ?? MadeiraConfig.get("env.DXMT_REMOTE_METAL")
             ?? ProcessInfo.processInfo.environment["DXMT_REMOTE_METAL"] ?? ""
-        return remote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && desktop != true && (bits == 32 || bits == 64)
-            && ["D3D9", "D3D11", "D3D11/D3D9"].contains(graphicsAPI)
+        if !remote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Turn off Remote Metal to use MadeiraFX on this iPad."
+        }
+        if desktop == true { return "Open the game’s own library entry; MadeiraFX is unavailable for Wine Desktop." }
+        if bits != 32 && bits != 64 { return "The game entry needs a supported 32-bit or 64-bit executable." }
+        let api = graphicsAPI?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if api.isEmpty { return "The game’s renderer has not been identified. Select its actual game EXE instead of a launcher." }
+        // Metadata lists every renderer the game can use, not the active one.
+        // Import and installation scans use different slash/whitespace formats.
+        let apis = Set(api.split(separator: "/").map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() })
+        if apis.isDisjoint(with: ["D3D9", "D3D11"]) {
+            return "Detected renderer: \(api). MadeiraFX requires local DXMT Direct3D 9 or 11."
+        }
+        return nil
     }
+    var spatialCompatible: Bool { spatialCompatibilityIssue == nil }
 
     /// A lower session monitor is a request to the game, not forced scaling of
     /// its render targets. Games may choose another mode; telemetry reports it.

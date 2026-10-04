@@ -46,7 +46,7 @@ struct PerformanceProfileSettings: View {
             Text("Capture releases when you open Madeira menus, edit touch controls, leave the game, or background the app. Pointer lock requires a raw mouse stream and a fullscreen iPad scene.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        MadeiraFXSettings(profile: profile, outputResolution: entry.resolution, compatible: entry.spatialCompatible)
+        MadeiraFXSettings(profile: profile, outputResolution: entry.resolution, compatibilityIssue: entry.spatialCompatibilityIssue)
         RendererCacheSettings(entry: entry)
     }
 }
@@ -54,7 +54,8 @@ struct PerformanceProfileSettings: View {
 struct MadeiraFXSettings: View {
     @Binding var profile: PerformanceProfile
     var outputResolution: String
-    var compatible: Bool
+    var compatibilityIssue: String?
+    private var compatible: Bool { compatibilityIssue == nil }
     private var supported: Bool { compatible && madeira_spatial_supported() != 0 }
     var body: some View {
         Section("MadeiraFX") {
@@ -86,7 +87,11 @@ struct MadeiraFXSettings: View {
                     }
                 }
             } else if !supported {
-                Text("Spatial requires a supported device and a local DXMT Direct3D 9 or 11 game. Desktop, remote Metal and other renderer paths retain original rendering and resolution.")
+                Text(spatialUnavailableReason)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if compatible {
+                Text("Choose Direct3D 9 or 11 in the game if it offers multiple renderers. MadeiraFX activates only on the local DXMT presentation path.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Picker("Frame interpolation", selection: Binding(get: { profile.interpolation }, set: {
@@ -104,6 +109,11 @@ struct MadeiraFXSettings: View {
             Text("Live dynamic internal resolution requires game support. Auto can recommend a scale for the next launch; it does not resize the game’s live render targets.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+    }
+    private var spatialUnavailableReason: String {
+        if let compatibilityIssue { return compatibilityIssue }
+        if madeira_performance_renderer_available() == 0 { return "Local DXMT effects are unavailable in this app build. Install the latest PR #2 app and keep Remote Metal off." }
+        return "This device or OS does not report MetalFX Spatial support."
     }
     private var internalResolution: String {
         let size = outputResolution.split(separator: "x").compactMap { Int($0) }

@@ -276,6 +276,18 @@ nativeFX.bits = 32; nativeFX.graphicsAPI = "D3D11"
 expect(nativeFX.spatialCompatible, "D3D11 guest Presenter uses the shared drawable-texture bridge")
 nativeFX.graphicsAPI = "D3D11/D3D9"
 expect(nativeFX.spatialCompatible, "mixed D3D11/D3D9 metadata uses two supported DXMT paths")
+nativeFX.graphicsAPI = " D3D11 / D3D9 "
+expect(nativeFX.spatialCompatible && nativeFX.spatialCompatibilityIssue == nil, "PE-import renderer labels with spaces admit the two supported DXMT APIs")
+nativeFX.graphicsAPI = "OpenGL / D3D11"
+expect(nativeFX.spatialCompatible, "a game offering OpenGL and Direct3D 11 can configure its DXMT path")
+nativeFX.performanceUpgrade?.interpolation = .double
+nativeFX.configureLaunch(); expect(interpolationMode == 1, "multi-renderer games can request interpolation on their DXMT path")
+nativeFX.graphicsAPI = "D3D11 / D3D12"
+expect(nativeFX.spatialCompatible, "a DX11/DX12 game can configure DX11 without claiming DX12 support")
+nativeFX.graphicsAPI = nil
+expect(!nativeFX.spatialCompatible && nativeFX.spatialCompatibilityIssue?.contains("not been identified") == true, "unknown renderer stays disabled with an actionable reason")
+nativeFX.graphicsAPI = "OpenGL"
+expect(!nativeFX.spatialCompatible && nativeFX.spatialCompatibilityIssue?.contains("OpenGL") == true, "OpenGL-only entries stay disabled with their detected renderer")
 nativeFX.graphicsAPI = "D3D9"; MadeiraConfig.values["d3d9"] = "emulated"
 expect(nativeFX.spatialCompatible, "emulated i386 Presenter uses the same native drawable-texture bridge")
 nativeFX.graphicsAPI = "D3D12"

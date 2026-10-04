@@ -426,3 +426,25 @@ optical-flow core and scheduling/admission tests. Apple SDK syntax checks found
 no new warnings in interpolation or performance bridge source. Existing baseline
 Swift/linker warnings remain. The unsigned IPA is rebuilt from this revision;
 packaging checks its resource hashes, executable architecture and dependencies.
+
+### MadeiraFX eligibility correction
+
+The initial profile gate compared the entire renderer label with a small list.
+PE-import detection formats mixed labels as `D3D11 / D3D9`, while installation
+scanning formats them as `D3D11/D3D9`. Games can also advertise both DX11 and
+OpenGL or DX12. Those labels could incorrectly gray out MadeiraFX on supported
+hardware. Eligibility now normalizes each API and admits an entry offering DX9
+or DX11, without treating its other renderers as supported. The user must select
+Direct3D 9/11; actual effects remain limited to the local DXMT present hooks.
+Unknown renderers, desktop composition, remote Metal and entries offering only
+unsupported APIs remain excluded. The UI now names the failed check instead of
+showing only a generic disabled explanation.
+
+Production profile tests cover spaced labels, DX11 with alternate renderers,
+unknown metadata and OpenGL-only exclusion. The renderer scanner and spatial
+routing suites also pass. No hardware failure was observed here: the correction
+addresses the confirmed metadata bug; iPad diagnostics identify other causes.
+
+The eligibility-fix app/helper release build passed in **129.66 seconds**.
+The new regression tests and renderer scanner/spatial suites passed; the PR #2
+unsigned bundle is refreshed from this source revision.
