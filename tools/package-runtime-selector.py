@@ -112,6 +112,7 @@ def main():
                     preserved[info.filename] = sha(data)
                 info.compress_type = zipfile.ZIP_STORED
                 packed.writestr(info, data)
+            original_file_count = len(preserved)
 
             def add(name, data, mode=0o644):
                 info = zipfile.ZipInfo(ROOT + name)
@@ -142,7 +143,8 @@ def main():
         if packed.read(ROOT + "Madeira.debug.dylib") != original_runtime:
             raise ValueError("Original runtime changed")
     manifest.update(artifact=args.output.name, bytes=args.output.stat().st_size,
-                    sha256=sha(args.output.read_bytes()), original_files_preserved=len(preserved))
+                    sha256=sha(args.output.read_bytes()), original_files_preserved=original_file_count,
+                    qol_overlay_files_verified=len(preserved) - original_file_count)
     args.output.with_suffix(".build.json").write_text(json.dumps(manifest, indent=2))
     args.output.with_suffix(".ipa.sha256").write_text(manifest["sha256"] + "  " + args.output.name + "\n")
     print(json.dumps(manifest, indent=2))
