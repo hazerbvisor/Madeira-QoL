@@ -500,3 +500,34 @@ certificate data, changed reference bytes and duplicate entries. This validates
 the packaging repair; an iPad retest is required to establish whether it resolves
 the reported ETS2 startup crash. The separately supplied runtime DLLs remain
 excluded from source control and from the public repository preview.
+
+### Corrected regression baseline and control artifact
+
+The user subsequently clarified that the original Madeira app launched ETS2,
+and that PR #2 also crashes with Spatial and interpolation both Off. The earlier
+answer naming a previous PR #2 build was corrected. The original v0.1.3 release
+used as our resource reference also has an empty Microsoft runtime directory,
+so restoring those DLLs does not explain the observed original/rebuild contrast.
+The runtime-complete package repairs an omission, rather than a confirmed cause
+of this crash.
+
+The original release reference and this branch's base use the same Wine, FEX and
+DXMT gitlinks; the source comparison also finds no changes to the original
+WineProcessBridge or FEXBridge glue. This does not establish binary equivalence:
+the native libraries and app were rebuilt, and PR #2 adds renderer hooks even
+when its optional effects are disabled.
+
+A cached pre-MadeiraFX Linux rebuild is available as a diagnostic control. Its
+IPA checksum, ZIP integrity and all 1,075 upstream resource hashes were checked;
+the executable contains none of the Spatial/interpolation backend symbols.
+`Madeira-original-source-control.ipa` preserves those compiled app/helper and
+resource bytes and all ZIP permissions, changing only the main Info.plist to
+set the existing `MadeiraBuild` label to `Diagnostic control: original-source
+Linux rebuild, no MadeiraFX`. The executable UUID remains
+`4C4C44FF-5555-3144-A135-940D2FE9E970`.
+
+This control is untested on an iPad. If it also fails, the shared rebuild path
+needs investigation; if it launches, later feature or build-configuration changes
+need investigation. Neither outcome alone proves a specific cause. The control
+has the older settings interface and may discard PR #2-only profile preferences
+when it saves an entry. Further device logs are deferred until the user can test.
