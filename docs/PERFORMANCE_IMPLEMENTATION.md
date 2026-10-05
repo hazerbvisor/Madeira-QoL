@@ -436,8 +436,9 @@ OpenGL or DX12. Those labels could incorrectly gray out MadeiraFX on supported
 hardware. Eligibility now normalizes each API and admits an entry offering DX9
 or DX11, without treating its other renderers as supported. The user must select
 Direct3D 9/11; actual effects remain limited to the local DXMT present hooks.
-Unknown renderers, desktop composition, remote Metal and entries offering only
-unsupported APIs remain excluded. The UI now names the failed check instead of
+Unknown renderers require an explicit per-game DXMT renderer choice. Desktop
+composition, remote Metal and automatically detected unsupported-only APIs
+remain excluded. The UI now names the failed check instead of
 showing only a generic disabled explanation.
 
 Production profile tests cover spaced labels, DX11 with alternate renderers,

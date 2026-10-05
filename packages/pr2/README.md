@@ -2,7 +2,7 @@
 
 This bundle contains the compiled Madeira app from PR #2, including performance
 profiles, local DXMT Spatial upscaling and experimental optical-flow interpolation.
-It is built from source commit `5fe4936ac8b7695a926a55a415a2475afcd121af`.
+It is built from source commit `146739447489f252df916b0e3d5b9c2f4d9b322c`.
 
 [Download PR #2 as ZIP, including both app archive parts](https://github.com/hazerbvisor/Madeira-QoL/archive/refs/heads/feature/madeira-performance-upgrade.zip)
 
@@ -14,7 +14,10 @@ It is built from source commit `5fe4936ac8b7695a926a55a415a2475afcd121af`.
 3. Extract `Madeira-PR2-unsigned.ipa`. The archive also includes its checksum,
    build provenance and instructions. No compilation or manual file joining
    is needed. Sign/install the unsigned IPA with your usual sideloading tool.
-4. To try interpolation, select **MadeiraFX → Frame interpolation → 2×
+4. For ETS2, choose its DirectX 11 mode and select **MadeiraFX → Game renderer →
+   Direct3D 11 (DXMT)**. This permits settings when automatic detection is unknown.
+   Select **Quality** for Spatial upscaling, then relaunch.
+5. To try interpolation, select **MadeiraFX → Frame interpolation → 2×
    (experimental)**, set a **30 FPS cap**, and relaunch. Admission requires stable
    native pacing, GPU headroom and compatible SDR output.
 
@@ -29,8 +32,9 @@ size limit. Its IPA uses standard uncompressed ZIP entries; extracted app files
 and their permissions match the tested compressed IPA exactly. The expanded IPA
 is roughly 508 MiB, so allow enough space for extraction and installation.
 
-This preview includes the mixed-renderer eligibility fix and specific disabled
-reasons. Choose ETS2’s DirectX 11 mode and configure its game EXE entry.
+This preview includes broader background renderer detection, a saved per-game
+renderer choice, and specific disabled reasons. The renderer choice records
+intent; effects still require actual local DXMT frames and device support.
 
 The full app/helper rebuild and affected frontend, renderer detection and spatial
 routing tests passed; the earlier 14-suite interpolation checkpoint also passed. Actual Metal execution,
