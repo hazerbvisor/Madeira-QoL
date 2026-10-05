@@ -4,6 +4,14 @@ This bundle contains the compiled Madeira app from PR #2, including performance
 profiles, local DXMT Spatial upscaling and experimental optical-flow interpolation.
 It is built from source commit `146739447489f252df916b0e3d5b9c2f4d9b322c`.
 
+The repository preview below omits the separately supplied Microsoft x64 runtime
+DLLs. Its `x86_64-vcruntime` directory is empty, so it is insufficient for games
+that require those implementations. Supply the official files as described in
+[the runtime instructions](../../tools/fetch-vcruntime.md), and verify the final
+IPA with `tools/verify-vcruntime.py` before installation. The runtime-complete
+replacement delivered through Google Drive retains this preview's app/helper
+binaries and adds all twelve unmodified DLLs plus Microsoft's license.
+
 [Download PR #2 as ZIP, including both app archive parts](https://github.com/hazerbvisor/Madeira-QoL/archive/refs/heads/feature/madeira-performance-upgrade.zip)
 
 1. Download the ZIP and unzip it. Open its `packages/pr2` folder.

@@ -474,3 +474,29 @@ head/tail reads, malformed offsets, read budgets, explicit-intent persistence,
 legacy/future defaults and exclusion checks that a manual choice cannot bypass.
 The refreshed unsigned PR #2 bundle includes this source revision. Actual iPad
 Metal execution and image quality remain device tests.
+
+### Runtime payload packaging follow-up
+
+The supplied ETS2 log reports `0xC0000005` during startup, with guest call frames
+in `steam_api64.dll`, before any Direct3D startup is logged. JIT activation and
+pool allocation complete. The user reports that the same game installation
+previously launched. This establishes a possible regression, but neither the
+exact previous build nor the cause of the access violation is confirmed.
+
+Inspection found a concrete packaging omission: the upstream IPA used as a
+resource reference contains an empty `x86_64-vcruntime` directory, and every
+rebuilt preview inherited it. Checking the 1,075 upstream resource hashes did
+not detect this missing external input. The replacement IPA adds the twelve
+required x64 DLLs, extracted unmodified from Microsoft's official VC++
+redistributable, and its license. App/helper executables, the original resources
+and their ZIP permission attributes are unchanged. The existing native EC SEH
+exemptions in `WineProcessBridge.m` remain in force.
+
+`tools/verify-vcruntime.py` checks completeness, ZIP duplicates, PE architecture,
+certificate envelopes and optional byte-for-byte matching with the extracted
+reference directory. Validation accepts the replacement and original reference
+files; rejects the earlier empty-runtime IPA, incorrect architecture, removed
+certificate data, changed reference bytes and duplicate entries. This validates
+the packaging repair; an iPad retest is required to establish whether it resolves
+the reported ETS2 startup crash. The separately supplied runtime DLLs remain
+excluded from source control and from the public repository preview.
