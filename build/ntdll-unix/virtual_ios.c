@@ -24722,7 +24722,28 @@ NTSTATUS WINAPI NtSetInformationVirtualMemory( HANDLE process,
  */
 NTSTATUS WINAPI NtFlushInstructionCache( HANDLE handle, const void *addr, SIZE_T size )
 {
-#if defined(__x86_64__) || defined(__i386__)
+#if defined(WINE_IOS)
+    /* The macOS configuration used by cross-builds can omit
+     * HAVE___CLEAR_CACHE. FEX's Windows ARM64EC backend nevertheless calls
+     * this syscall to publish generated blocks and instruction patches.
+     * Darwin's cache service handles the executable view of the dual map;
+     * do not substitute inline dc/ic instructions on protected RX pages. */
+    if (handle == GetCurrentProcess())
+    {
+        if (size)
+        {
+            static int reported;
+            sys_icache_invalidate( (void *)addr, size );
+            if (__sync_bool_compare_and_swap( &reported, 0, 1 ))
+                dprintf( STDERR_FILENO, "[jit-icache] darwin-invalidate-v1 addr=%p size=%zu\n", addr, size );
+        }
+    }
+    else
+    {
+        static int once;
+        if (!once++) FIXME( "%p %p %ld other process not supported\n", handle, addr, size );
+    }
+#elif defined(__x86_64__) || defined(__i386__)
     /* no-op */
 #elif defined(HAVE___CLEAR_CACHE)
     if (handle == GetCurrentProcess())

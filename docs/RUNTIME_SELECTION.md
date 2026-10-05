@@ -186,3 +186,45 @@ copy API and record unreadable regions without dereferencing them. Capture
 does not change register state or execute guest code. Only the first such
 fault per app process is captured; cold-restart before collecting a new
 report. The original packaged runtime remains byte-for-byte unchanged.
+
+### Restore the iOS instruction-cache flush
+
+The subsequent 22:00 device report reproduces the original invalid-guest-RIP
+failure: guest RIP `1`, then a native branch to null. Entry/current registers
+match, so that unhandled fault is not caused by this handler changing its
+registers. The report identifies the last JIT block, but the initial capture
+attempted to read code at null and could not recover that block's instructions.
+Null-PC captures now use the link register and last JIT block for their bounded
+code windows.
+
+Binary comparison found a concrete build regression: the working original
+`NtFlushInstructionCache` calls Darwin's `__clear_cache`, which calls
+`sys_icache_invalidate`. The failing rebuilt syscall never calls a cache
+service; `wine/build-macos/include/config.h` disables `HAVE___CLEAR_CACHE`.
+FEX's packaged Windows ARM64EC backend explicitly relies on this syscall when
+publishing generated blocks and patching instructions. Returning success
+without invalidating their executable view leaves instruction visibility
+unestablished and allows stale code to run.
+
+The iOS implementation now explicitly calls `sys_icache_invalidate` for the
+current process, independent of the host Wine configure result. It passes the
+executable address and byte count through unchanged and logs
+`[jit-icache] darwin-invalidate-v1` once. The unsupported remote-process path
+retains its existing behavior. This changes app-owned native Wine code;
+the Windows guest DLLs and original runtime are unchanged.
+
+`tests/host/check-ios-icache.py` executes the linked ARM64 syscall in Unicorn
+and intercepts Darwin imports. The original release passes, the previous QoL
+binary fails because it omits the cache call, and the corrected binary must
+pass exact block/4-byte patch-span checks and the remote-handle check. Example
+with Python `unicorn` and LLVM tools installed:
+
+```sh
+python3 tests/host/check-ios-icache.py /path/to/MadeiraQoL.dylib \
+  --objdump /path/to/llvm-objdump
+```
+
+This verifies an actual native behavioral difference from the working release,
+not hardware cache coherence or a completed ETS2 session. Stale instructions
+could explain the inconsistent startup faults, but the corrected runtime still
+needs a device run to confirm that this resolves the game's failure.

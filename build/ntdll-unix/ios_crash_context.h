@@ -92,7 +92,23 @@ static void ios_capture_crash_context(const arm_thread_state64_t *entry,
     }
     /* At most 20 KiB of code and 1.25 KiB of state, encoded as plain text.
      * Include preceding blocks to investigate unexpected entry/return PCs. */
-    ios_crash_context_bytes(fd, "host-code", page >= 0x4000 ? page - 0x4000 : 0, 0x5000);
+    if (pc >= 0x100000000ULL)
+        ios_crash_context_bytes(fd, "host-code", page - 0x4000, 0x5000);
+    else
+    {
+        /* An invalid guest target can branch to null after CompileBlock
+         * refuses it. Capture the caller and last JIT block instead of
+         * spending the code budget on unmapped address zero. */
+        uint64_t lr = (uint64_t)__darwin_arm_thread_state64_get_lr(*entry);
+        uint64_t block = 0;
+        mach_vm_size_t read = 0;
+        if (lr >= 0x100000000ULL)
+            ios_crash_context_bytes(fd, "caller-code", (lr & ~0xfffULL) - 0x1000, 0x2000);
+        if (mach_vm_read_overwrite(mach_task_self(), entry->__x[28], sizeof(block),
+                                   (mach_vm_address_t)&block, &read) == KERN_SUCCESS &&
+            read == sizeof(block) && block >= 0x100000000ULL)
+            ios_crash_context_bytes(fd, "last-jit-block-code", (block & ~0xfffULL) - 0x1000, 0x3000);
+    }
     ios_crash_context_bytes(fd, "fex-state-x28", entry->__x[28], 1024);
     ios_crash_context_bytes(fd, "guest-stack-x23", entry->__x[23], 256);
     if (fd >= 0)
