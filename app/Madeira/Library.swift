@@ -1981,6 +1981,49 @@ struct LibraryCells<Item: Identifiable, Cell: View>: View {
     }
 }
 
+/// This preference is consumed by the small native launcher before either
+/// runtime is loaded. It never changes the engine in an existing process.
+private struct RuntimeSelectionSettings: View {
+    private static var choiceFile: URL {
+        LibraryModel.documents.appendingPathComponent("madeira-runtime.txt")
+    }
+    private static var savedQoL: Bool {
+        (try? String(contentsOf: choiceFile, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)) == "qol"
+    }
+    @State private var useQoL = Self.savedQoL
+    @State private var notice: String?
+    private let available = ProcessInfo.processInfo.environment["MADEIRA_RUNTIME_SELECTOR"] == "1"
+    private let active = ProcessInfo.processInfo.environment["MADEIRA_ACTIVE_RUNTIME"] == "original"
+        ? "Original Madeira" : "Madeira-QoL"
+
+    var body: some View {
+        if available {
+            Section {
+                Toggle("Use Madeira-QoL", isOn: Binding(get: { useQoL }, set: { enabled in
+                    do {
+                        try (enabled ? "qol" : "original").write(to: Self.choiceFile, atomically: true, encoding: .utf8)
+                        useQoL = enabled
+                        notice = "Swipe Madeira away in the app switcher, then open it again to load \(enabled ? "Madeira-QoL" : "Original Madeira")."
+                    } catch {
+                        notice = "Could not save the runtime choice: " + error.localizedDescription
+                    }
+                }))
+                LabeledContent("Active runtime", value: active)
+            } header: {
+                Text("Runtime")
+            } footer: {
+                Text("Off loads the original Madeira v0.1.3 app and runtime, including its original interface. On enables the QoL build and MadeiraFX. Games and saves are shared. Switching requires restarting Madeira; a startup picker lets you switch back from either build.")
+            }
+            .alert("Madeira runtime", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
+                Button("OK", role: .cancel) { notice = nil }
+            } message: {
+                Text(notice ?? "")
+            }
+        }
+    }
+}
+
 struct LibraryView: View {
     @ObservedObject private var model = LibraryModel.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -2133,6 +2176,9 @@ struct LibraryView: View {
                 Section {
                     Toggle("Extended logging", isOn: $input.diagnostics)
                 } header: { Text("Diagnostics") }
+            }
+            if settingsShow("runtime", "original", "Madeira-QoL", "QoL", "features") {
+                RuntimeSelectionSettings()
             }
             if settingsShow("pointer", "mouse", "cursor", "touch", "trackpad", "sensitivity") {
                 Section("Pointer") { LibraryPointerSettings() }

@@ -2,6 +2,11 @@
 
 Specification: [MADEIRA_PERFORMANCE_GOAL.md](MADEIRA_PERFORMANCE_GOAL.md).
 
+The optional [dual-runtime package](RUNTIME_SELECTION.md) adds a cold-start
+choice between the byte-identical original v0.1.3 app/runtime and this QoL
+build. Original is the default. It is separate from disabling optional effects
+inside the rebuilt runtime and remains unverified on an iPad.
+
 ## Architecture audit (before implementation)
 
 Audited main `f5b4b4a`: its only change from the previously built application

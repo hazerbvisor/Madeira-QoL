@@ -1339,7 +1339,12 @@ static void *wine_process_thread(void *arg) {
             // that exercise the full C++ runtime (parallel_for, atomic_wait,
             // <filesystem>, etc.) don't trip __wine_unimplemented stubs.
             if (use_arm64ec) {
-                NSString *vcrtSource = [bundlePath stringByAppendingPathComponent:@"x86_64-vcruntime"];
+                // The dual-runtime package keeps the original release's
+                // resources untouched. Only the QoL runtime uses this overlay.
+                const char *activeRuntime = getenv("MADEIRA_ACTIVE_RUNTIME");
+                NSString *vcrtFolder = activeRuntime && !strcmp(activeRuntime, "qol")
+                    ? @"qol-x86_64-vcruntime" : @"x86_64-vcruntime";
+                NSString *vcrtSource = [bundlePath stringByAppendingPathComponent:vcrtFolder];
                 NSArray *vcrtDlls = [fm contentsOfDirectoryAtPath:vcrtSource error:nil];
                 int vcrtLinked = 0, vcrtSkipped = 0;
                 for (NSString *dll in vcrtDlls) {
