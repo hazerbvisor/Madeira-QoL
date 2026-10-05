@@ -170,3 +170,19 @@ different failure. The runtime wrote a 620,756,992-byte snapshot to
 `Documents/fex-jit-dump.bin`; preserve that file from this launch for further
 analysis before another failed launch replaces it. The unchanged original
 runtime remains the working device baseline.
+
+### Small crash report
+
+The next diagnostic build captures the first unhandled bad access as
+`Documents/madeira-crash-context.txt`, under 128 KiB. The same report is
+included in `madeira-log.txt` with a `[crash-context] snapshot-v1` marker, so
+sharing the ordinary log is sufficient. No large JIT dump is needed for this
+step. This is diagnostic instrumentation, not a claimed startup crash fix.
+
+It records all integer registers at Mach-handler entry and after attempted
+handling, decodes STLR's base register, and saves at most 20 KiB of nearby
+generated code plus 1.25 KiB of guest state/stack. Memory reads use the Mach
+copy API and record unreadable regions without dereferencing them. Capture
+does not change register state or execute guest code. Only the first such
+fault per app process is captured; cold-restart before collecting a new
+report. The original packaged runtime remains byte-for-byte unchanged.

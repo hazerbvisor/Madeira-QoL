@@ -50,6 +50,7 @@
 #include <pthread/pthread.h>
 #include <pthread/qos.h>
 #include <fcntl.h>
+#include "ios_crash_context.h"
 #endif
 #ifdef HAVE_SYS_PARAM_H
 # include <sys/param.h>
@@ -1860,6 +1861,7 @@ static void *ios_mach_exception_thread( void *arg )
                                           (thread_state_t)&neon_state, &neon_count) == KERN_SUCCESS);
         if (kr == KERN_SUCCESS)
         {
+            const arm_thread_state64_t fault_entry_state = state;
             uintptr_t fault_addr = (uintptr_t)req->code[1];
 #ifdef WINE_IOS
             /* ml939: THE SUB-FLOOR SERVICE BELONGS HERE, NOT IN segv_handler.
@@ -4237,6 +4239,9 @@ skip_reclaim_band: ;
                                   (thread_state_t)&state, count );
             else
             {
+                if (req->exception == EXC_BAD_ACCESS)
+                    ios_capture_crash_context(&fault_entry_state, &state,
+                                               fault_addr, req->code[0]);
                 /* Rate-limit: log first 5 unhandled faults then every 100th */
                 static volatile int unhandled_count = 0;
                 int cnt = __sync_add_and_fetch(&unhandled_count, 1);
