@@ -80,7 +80,24 @@ packaging step is required to add the selector.
 Host tests verify that only the chosen runtime initializes, that Wine's global
 symbol lookup resolves that runtime, and that failed loading/entry lookup never
 initializes a replacement. Both iOS libraries and the launcher are compiled and
-checked as packaged artifacts. Apple dyld loading, the startup picker, profile
-preservation, JIT and ETS2 must still be verified on an iPad after signing.
-This feature provides an actual original-runtime option; it is not evidence
-that the unresolved PR #2 ETS2 crash has been fixed.
+checked as packaged artifacts.
+
+An October 5 device log now confirms original-mode loading and JIT on an
+iPad16,8 running iPadOS 27.0 (24A5390f). The loaded `Madeira.debug.dylib` UUID,
+`636312C6-C8B6-3538-9FC1-8B426F3D87D4`, matches the original release library.
+ETS2 starts with DXMT Direct3D 11 at 1280x960 and continues rendering during
+roughly 21 minutes of reported play, reaching presentation sequence 40,704.
+The earlier null-PC/invalid-RIP startup failure does not recur. A logged
+StikJIT detach breakpoint is skipped and execution continues; it is not the
+earlier game startup fault. The log does not establish a clean main-process
+exit.
+
+Median reported presentation-call gap is 33.3 ms, with occasional stalls
+exceeding a second. This is call timing, not independent confirmation of
+displayed FPS. Reported memory footprint peaks at 8,992 MB and ends at
+8,421 MB. These are an original-mode baseline, not a QoL performance result.
+
+QoL loading/gameplay, MadeiraFX, switching in both directions, profile
+preservation and recovery UI still require separate device validation. The
+rebuilt PR #2 runtime's ETS2 startup failure remains unresolved; successful
+original-mode play does not establish its cause or a fix for the QoL engine.
