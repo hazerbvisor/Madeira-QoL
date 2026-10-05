@@ -101,3 +101,31 @@ QoL loading/gameplay, MadeiraFX, switching in both directions, profile
 preservation and recovery UI still require separate device validation. The
 rebuilt PR #2 runtime's ETS2 startup failure remains unresolved; successful
 original-mode play does not establish its cause or a fix for the QoL engine.
+
+### QoL return-state candidate fix
+
+Comparing the failing and working logs places the earlier failure before
+Direct3D initialization: FEX is asked to execute guest RIP `1`, then branches
+to null after rejecting it. All 1,012 packaged Windows guest files in the
+failing IPA match the original release, including the game-facing FEX DLL.
+Rebuilding that DLL or changing MadeiraFX does not follow from this evidence.
+
+The native Wine fault handler did extend Darwin's `__x[29]` array to access
+registers 29, 30 and sometimes 31. Those registers are separate `__fp`, `__lr`
+and `__sp` members. Adjacent storage does not make those C array accesses
+valid. `ios_arm64_registers.h` now selects the actual member for each register;
+instruction data operands retain XZR/WZR's zero/discard behavior. This applies
+to signal-context access, Mach instruction emulation and affected register
+dumps. The original packaged runtime remains unchanged.
+
+`python3 tests/host/check-arm64-registers.py` runs the actual C emulation
+helpers with optimization and bounds sanitizers. It checks FP/LR loads and
+stores, pair operations, 32-bit zero extension, SP writeback and XZR. Running
+the same harness against the earlier source fails with an out-of-bounds
+register access. The rebuilt native handler logs `[arm64-context]
+register-members-v1` once during startup to identify this revision.
+
+This is a verified native bounds fix and a candidate for the compiler-dependent
+startup regression, **not a confirmed fix for ETS2**. The logs do not identify
+which earlier instruction wrote the invalid guest return address. Device
+gameplay with the patched QoL runtime is still needed to resolve that question.
