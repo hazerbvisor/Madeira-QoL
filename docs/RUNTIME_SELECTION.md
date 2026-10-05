@@ -97,8 +97,9 @@ exceeding a second. This is call timing, not independent confirmation of
 displayed FPS. Reported memory footprint peaks at 8,992 MB and ends at
 8,421 MB. These are an original-mode baseline, not a QoL performance result.
 
-QoL loading/gameplay, MadeiraFX, switching in both directions, profile
-preservation and recovery UI still require separate device validation. The
+QoL loading is now confirmed, but ETS2 startup fails in that mode. MadeiraFX,
+switching in both directions, profile preservation and recovery UI still
+require separate device validation. The
 rebuilt PR #2 runtime's ETS2 startup failure remains unresolved; successful
 original-mode play does not establish its cause or a fix for the QoL engine.
 
@@ -134,4 +135,38 @@ does not explain the already-linked IPA's device startup failure.
 This is a verified native bounds fix and a candidate for the compiler-dependent
 startup regression, **not a confirmed fix for ETS2**. The logs do not identify
 which earlier instruction wrote the invalid guest return address. Device
-gameplay with the patched QoL runtime is still needed to resolve that question.
+gameplay with the patched QoL runtime was subsequently tested and failed, as
+recorded below.
+
+### Patched QoL device result: startup access violation
+
+The October 5 log captured at 21:24 confirms the candidate library UUID
+`4C4C4421-5555-3144-A1A2-23FB31639CC4` and the `register-members-v1` marker.
+JIT allocation and debugger detachment succeed. ETS2 still fails during DLL
+initialization, before Direct3D/MadeiraFX initialization, and exits with
+`0xc0000005`. This candidate does **not** resolve the device startup regression.
+
+The first unhandled fault is a generated ARM64 `STLR X0, [X6]` instruction
+(`0xc89ffcc0`) at host PC `0x16c001184`, reported as a write to address zero.
+FEX's saved guest RIP is `0x71fce3c644`, inside `steam_api64.dll` loaded at
+`0x71fcd20000` (RVA `0x11c644`). The saved RIP is a block location; the log's
+exact-instruction resolver fails, so it cannot identify the precise x86
+instruction responsible. Unlike the earlier log, the initial guest RIP is
+valid. During subsequent exception dispatch FEX attempts to execute guest
+stack data at `0x702580db10`, then encounters another null access. Those later
+faults must not be mistaken for the initial failure.
+
+Reported footprint peaks at 1,426 MB, with over 11 GB available during native
+startup. The terminal event is an access violation, with no recorded jetsam
+or out-of-memory termination. Freeing memory or toggling MadeiraFX is not an
+evidence-based fix for this failure.
+
+The nearby JIT bytes materialize `0x71fcee9b98` into X6 before the faulting
+store, while the reported fault address is zero. The log does not capture X6
+at the fault or the full preceding JIT block. It therefore cannot distinguish
+a changed register, an incorrect control-flow entry, or a problem in fault
+reporting/handling. It also does not establish that the bounds fix caused this
+different failure. The runtime wrote a 620,756,992-byte snapshot to
+`Documents/fex-jit-dump.bin`; preserve that file from this launch for further
+analysis before another failed launch replaces it. The unchanged original
+runtime remains the working device baseline.
