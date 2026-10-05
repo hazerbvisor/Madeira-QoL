@@ -113,7 +113,8 @@ struct PerformanceProfile: Codable, Equatable {
 }
 
 /// Admission for color-only optical flow; independent of engine reconstruction inputs.
-/// Enter after three stable samples; immediately withdraw on missing data or pressure.
+/// Auto enters after three stable samples. Manual 2× tolerates pacing variation;
+/// both modes withdraw on missing GPU measurements or pressure.
 struct OpticalFlowAdmission {
     private(set) var enabled = false
     private var stableSamples = 0
@@ -127,12 +128,13 @@ struct OpticalFlowAdmission {
         if mode == .off { reason = 0 }
         else if constrained { reason = 4 }
         else if (cap != 30 && cap != 60) || panelFPS < cap * 2 { reason = 5 }
-        else if !nativeFPS.isFinite || !meanMS.isFinite || !p95MS.isFinite ||
+        else if !nativeFPS.isFinite || nativeFPS <= 0 { reason = 6 }
+        else if mode == .auto && (!meanMS.isFinite || !p95MS.isFinite ||
                 nativeFPS < Double(cap) * 0.9 || nativeFPS > Double(cap) * 1.1 ||
                 meanMS < 900 / Double(cap) || meanMS > 1100 / Double(cap) ||
-                p95MS < meanMS || p95MS > meanMS * 1.15 { reason = 6 }
+                p95MS < meanMS || p95MS > meanMS * 1.15) { reason = 6 }
         else if let gpuMS, gpuMS.isFinite, gpuMS > 0,
-                gpuMS < (1000 / Double(cap)) * (enabled ? (mode == .auto ? 0.35 : 0.45) : (mode == .auto ? 0.20 : 0.25)) {
+                gpuMS < (1000 / Double(cap)) * (mode == .double ? 0.45 : (enabled ? 0.35 : 0.20)) {
             reason = 0
         } else { reason = 9 }
         if reason != 0 || mode == .off {
@@ -140,7 +142,9 @@ struct OpticalFlowAdmission {
             enabled = false; stableSamples = 0
             return reason
         }
-        guard now.isFinite, now >= cooldownUntil else { return 1 }
+        guard now.isFinite else { enabled = false; stableSamples = 0; return 1 }
+        if mode == .double { enabled = true; stableSamples = 0; return 2 }
+        guard now >= cooldownUntil else { return 1 }
         stableSamples = min(3, stableSamples + 1)
         enabled = stableSamples == 3
         return enabled ? 2 : 1

@@ -55,7 +55,8 @@ struct LibraryMetrics: View {
             }
             lines.append("MadeiraFX \(requested.label): \(state)")
             let interpolationReasons = [0: "Off", 1: "Waiting for stable samples", 2: "Warming history", 3: "2× active (experimental)",
-                4: "Paused for pressure/power", 5: "Needs 30/60 native and 60/120 Hz display", 6: "Unstable native pacing",
+                4: "Paused for pressure/power", 5: "Needs 30/60 FPS cap and 60/120 Hz display",
+                6: library.activeEntry?.performanceUpgrade?.interpolation == .auto ? "Unstable native pacing" : "Waiting for native timing",
                 7: "Format/device/storage unsupported", 8: "Motion confidence too low", 9: "Insufficient GPU headroom",
                 10: "Missed presentation window", 11: "Previous frame still in flight"]
             lines.append("Interpolation: \(interpolationReasons[value.interpolationStatus] ?? "Unavailable")")

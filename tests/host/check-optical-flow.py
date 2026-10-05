@@ -90,13 +90,35 @@ int main(){
  MadeiraInterpolationTimes t;
  assert(!madeira_interpolation_times(NAN,0,30,&t));assert(!madeira_interpolation_times(10,-1,30,&t));
  assert(!madeira_interpolation_times(10,0,40,&t));assert(!madeira_interpolation_times(10,0,30,nullptr));
- puts("PASS: exact shader motion matching, warped midpoint, static image, borders, confidence/scene cuts and 30/60 FPS deadlines");
+ double period;
+ assert(madeira_interpolation_pair_period(1./20,30,0,&period) && abs(period-.05)<1e-9);
+ assert(!madeira_interpolation_pair_period(1./20,30,1,&period)); // Auto still requires steady 30
+ assert(madeira_interpolation_pair_period(.04,30,0,&period) && abs(period-.04)<1e-9);
+ assert(madeira_interpolation_pair_period(.02,30,0,&period) && abs(period-1./30)<1e-9); // panel budget
+ assert(!madeira_interpolation_pair_period(.1,30,0,&period)); // re-warm after a long pause
+ assert(!madeira_interpolation_pair_period(.001,30,0,&period)); // no burst pairing
+ assert(!madeira_interpolation_pair_period(NAN,30,0,&period));
+ for(int fps:{30,60}) {
+  double interval=1.5/fps;
+  MadeiraInterpolationTimes first, late;
+  assert(madeira_interpolation_variable_times(10,0,interval,fps,&first));
+  assert(abs(first.native-first.generated-interval*.5)<1e-9);
+  assert(madeira_interpolation_variable_times(10+2./fps,first.native,interval,fps,&late));
+  assert(late.generated>=10+2./fps+.001 && late.native>first.native); // rebase late, don't catch up
+  assert(!madeira_interpolation_variable_times(9,first.native,interval,fps,&late)); // no future backlog
+  assert(!madeira_interpolation_variable_times(10,0,3./fps,fps,&late)); // bounded history
+  assert(!madeira_interpolation_variable_times(10,0,NAN,fps,&late));
+  double fallback=madeira_interpolation_fallback_time(10,first.native,fps);
+  assert(fallback>first.native && abs(fallback-first.native-.5/fps)<1e-9);
+  assert(madeira_interpolation_fallback_time(first.native+.001,first.native,fps)==0);
+ }
+ puts("PASS: exact shader core, confidence, strict Auto deadlines, uneven manual intervals, late rebase, display budget and ordered fallback");
 }
 '''
 swift=r'''
 import Foundation
 var policy = OpticalFlowAdmission()
-func tick(_ time: Double, mode: FrameInterpolationMode = .double, cap: Int = 30, panel: Int = 60,
+func tick(_ time: Double, mode: FrameInterpolationMode = .auto, cap: Int = 30, panel: Int = 60,
           rate: Double = 30, mean: Double = 1000/30, p95: Double = 35, gpu: Double? = 4, pressure: Bool = false) -> Int {
  policy.update(mode: mode, cap: cap, panelFPS: panel, nativeFPS: rate, meanMS: mean, p95MS: p95, gpuMS: gpu, constrained: pressure, now: time)
 }
@@ -108,10 +130,19 @@ assert(tick(2,cap:40)==5);assert(tick(3,rate:20)==6);assert(tick(4,p95:50)==6)
 assert(tick(5,gpu:nil)==9);assert(tick(6,gpu:.nan)==9);assert(tick(7,gpu:20)==9)
 assert(tick(8,mode:.off)==0 && !policy.enabled)
 assert(tick(9,mode:.auto,gpu:7)==9) // Auto enters with stricter headroom
-assert(tick(10,gpu:7)==1 && tick(11,gpu:7)==1 && tick(12,gpu:7)==2)
-assert(tick(13,gpu:12)==2 && policy.enabled) // active threshold avoids oscillation
-assert(tick(14,gpu:16)==9 && !policy.enabled)
-print("PASS: stable admission, cooldown, pressure, native/display caps, pacing, missing GPU data and Auto headroom")
+assert(tick(10,mode:.double,gpu:7)==2 && policy.enabled) // manual enters immediately
+assert(tick(11,mode:.double,rate:25,mean:40,p95:80,gpu:12)==2 && policy.enabled)
+assert(tick(12,mode:.double,rate:20,mean:50,p95:100)==2 && policy.enabled)
+assert(tick(13,mode:.double,rate:28,mean:35,p95:.nan)==2 && policy.enabled)
+assert(tick(14,mode:.double,gpu:16)==9 && !policy.enabled)
+assert(tick(15,mode:.double,pressure:true)==4 && !policy.enabled)
+assert(tick(16,mode:.double,rate:22,mean:45,p95:90)==2 && policy.enabled)
+assert(tick(17,mode:.double,rate:0)==6 && !policy.enabled)
+assert(tick(18,mode:.double,rate:.nan)==6 && !policy.enabled)
+assert(tick(19,mode:.double,panel:30)==5 && !policy.enabled)
+assert(tick(20,mode:.double,gpu:nil)==9 && !policy.enabled)
+assert(tick(.nan,mode:.double)==1 && !policy.enabled)
+print("PASS: Auto stable admission/cooldown, manual uneven FPS and immediate admission, pressure/display limits and measured GPU headroom")
 '''
 with tempfile.TemporaryDirectory() as directory:
  work=Path(directory);cpp=work/'core.cpp';cpp.write_text(adapter+core+checks)

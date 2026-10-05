@@ -234,12 +234,15 @@ separate from Spatial’s budget. Only SDR BGRA8/RGBA8 Unorm, single-sample outp
 between 320×240 and 1920×1440 is admitted. No game resources are resized and no
 scene depth or game motion vectors are guessed.
 
-Admission requires a fixed native 30 or 60 FPS cap, a panel supporting at least
-60 or 120 Hz respectively, three stable one-second samples and measured GPU
-headroom. Auto uses stricter headroom and confidence thresholds. Missing timing,
-unstable pacing, memory pressure, serious thermal state and Low Power Mode
-withdraw admission. Menu, launch and background transitions reset history and
-pause synthesis; recovery requires stable samples again. Safety sampling runs
+Admission requires a 30 or 60 FPS cap, a panel supporting at least 60 or 120 Hz
+respectively, and measured GPU headroom. Manual **2×** enters without waiting
+for stable samples and tolerates varying native FPS and frame-time percentiles.
+Auto retains three stable one-second samples plus its stricter headroom and
+confidence thresholds. Missing native/GPU measurements, memory pressure,
+serious thermal state and Low Power Mode withdraw both modes; unstable pacing
+withdraws Auto. Menu, launch and background transitions reset history and
+pause synthesis. Manual can resume when measurements/headroom return; Auto
+requires stable samples again. Safety sampling runs
 when interpolation is requested even with the HUD hidden. With HUD, Auto and
 interpolation all off, no sampling timer runs.
 
@@ -250,7 +253,13 @@ blits the generated image and schedules midpoint and native drawables half a
 native period apart. This deliberately delays native display by roughly half
 a frame (16.7 ms at 30 FPS, 8.3 ms at 60 FPS), plus scheduling overhead. Late,
 busy, low-confidence or failed work presents native alone; no catch-up burst
-is queued. Acquisition can still wait on the iOS drawable pool; slow acquisition
+is queued. Manual accepts pair intervals between half and twice the configured
+native period, uses the observed interval (bounded by the panel budget) for
+midpoint spacing, and rebases late deadlines to the current frame. Longer
+pauses warm fresh history. Auto retains the original ±10% pair-interval and
+fixed-deadline checks. A skipped manual midpoint does not let its native frame
+jump ahead of an earlier native frame scheduled in the future. Acquisition can
+still wait on the iOS drawable pool; slow acquisition
 rejects generation afterward. Actual driver scheduling and latency need device
 verification. One layer may have only one interpolation operation in flight.
 
@@ -412,9 +421,12 @@ This procedure has not been run here because no iOS GPU or game is connected.
 In a local DXMT D3D9/D3D11 game’s MadeiraFX settings choose **2× (experimental)**
 and **Precise FPS cap: 30 FPS**, set SDR output to 1280×960 or lower, then relaunch.
 Spatial may be enabled independently. Enable the FPS and Graphics HUD fields.
-Wait for stable native pacing and inspect the interpolation state. A 20–25 FPS
-native workload will remain rejected; interpolation cannot repair those stalls.
-Auto uses stricter admission and may stay inactive for scenes accepted by 2×.
+Inspect the interpolation state and the separate generated-frame counters.
+Manual 2× can try synthesis at uneven 20–30 native FPS with a 30 FPS cap;
+it does not wait for the old stable-pacing threshold. This may produce about
+40–60 total frames per second when every pair is accepted, not a guaranteed
+60 FPS. GPU limits, confidence failures and long stalls still skip generation.
+Auto requires stable pacing and may stay inactive for scenes accepted by 2×.
 For native 60 FPS interpolation the panel must support 120 Hz.
 
 Compare the same scene with interpolation Off. Check moving objects, camera pans,

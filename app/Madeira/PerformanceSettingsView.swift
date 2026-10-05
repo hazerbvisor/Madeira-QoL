@@ -107,7 +107,7 @@ struct MadeiraFXSettings: View {
                 Text("2× (experimental)").tag(FrameInterpolationMode.double)
                 Text("Auto (experimental)").tag(FrameInterpolationMode.auto)
             }.disabled(!compatible || madeira_interpolation_supported() == 0)
-            Text("Color-based optical flow generates a midpoint between rendered frames. Requires stable native 30/60 FPS, a 60/120 Hz display, GPU headroom and SDR output up to 1920×1440. Adds about half a native frame of display delay and may produce motion artifacts. Auto uses stricter quality and headroom gates. Changes apply at the next launch.")
+            Text("Color-based optical flow generates a midpoint between rendered frames. Manual 2× tolerates uneven FPS and adjusts to arriving frames; Auto requires stable native 30/60 FPS. Both need a 30/60 FPS cap, a 60/120 Hz display, GPU headroom and SDR output up to 1920×1440. Late or unsuitable frames may be skipped. Adds about half a native frame of display delay and may produce motion artifacts. Changes apply at the next launch.")
                 .font(.caption).foregroundStyle(.secondary)
             Text("MetalFX temporal reconstruction remains unavailable: the game does not supply motion vectors, depth and camera jitter.")
                 .font(.caption).foregroundStyle(.secondary)

@@ -168,8 +168,10 @@ int madeira_interpolation_present(id<MTLCommandBuffer> buffer,id<CAMetalDrawable
     if ((fps!=30 && fps!=60) || generation!=atomic_load(&epoch) || !atomic_load(&gateEnabled)) { [ctx.lock unlock]; return 0; }
     id<MTLCommandQueue> queue=buffer.commandQueue;
     double now=CACurrentMediaTime(),period=1.0/fps;
-    BOOL pair=ctx.valid && ctx.queue==buffer.commandQueue && now-ctx.previousTime>=period*0.9 && now-ctx.previousTime<=period*1.1;
-    if (!pair) ctx.lastNativeDeadline=0;
+    BOOL pair=ctx.valid && ctx.queue==buffer.commandQueue &&
+        madeira_interpolation_pair_period(now-ctx.previousTime,fps,mode==2,&period);
+    if (!pair && (mode==2 || ctx.queue!=buffer.commandQueue)) ctx.lastNativeDeadline=0;
+    BOOL deferNative=mode==1 && ctx.lastNativeDeadline>now;
     ctx.busy=YES; uint64_t version=++ctx.version;
     ctx.queue=buffer.commandQueue; ctx.previousTime=now;
     [ctx.lock unlock];
@@ -182,6 +184,7 @@ int madeira_interpolation_present(id<MTLCommandBuffer> buffer,id<CAMetalDrawable
     BOOL synthesized=pair && encode(ctx,buffer,color);
     BOOL historyCopied=copy(buffer,color,ctx.history);
     if (!historyCopied) synthesized=NO;
+    BOOL ownsPresentation=synthesized || deferNative;
     if (synthesized) { pthread_mutex_lock(&metricsLock); counters.encoded++; pthread_mutex_unlock(&metricsLock); }
     else status(2);
     [buffer addCompletedHandler:^(id<MTLCommandBuffer> done) {
@@ -193,20 +196,27 @@ int madeira_interpolation_present(id<MTLCommandBuffer> buffer,id<CAMetalDrawable
         const uint32_t *summary=ctx.summary.contents;
         BOOL confident=madeira_interpolation_confidence(summary[0],summary[1],summary[2],mode==2);
         double gpu=done.GPUEndTime-done.GPUStartTime;
+        double completedNow=CACurrentMediaTime();
         BOOL timely=done.GPUStartTime>0 && gpu>0 && gpu<period*(mode==2?0.35:0.45) &&
-            madeira_interpolation_times(CACurrentMediaTime(),ctx.lastNativeDeadline,fps,&times);
+            (mode==2 ? madeira_interpolation_times(completedNow,ctx.lastNativeDeadline,fps,&times) :
+                       madeira_interpolation_variable_times(completedNow,ctx.lastNativeDeadline,period,fps,&times));
         BOOL show=synthesized && active && confident && timely;
-        if (!show) ctx.lastNativeDeadline=0;
+        double fallbackNative=ownsPresentation && mode==1 ?
+            madeira_interpolation_fallback_time(completedNow,ctx.lastNativeDeadline,fps) : 0;
+        if (!show) ctx.lastNativeDeadline=fallbackNative;
         else ctx.lastNativeDeadline=times.native;
         [ctx.lock unlock];
-        if (!synthesized) {
+        if (!ownsPresentation) {
             // Warm history without changing the original native presentation.
             [ctx.lock lock]; ctx.busy=NO; if (!active) [ctx discard]; [ctx.lock unlock];
             return;
         }
         id<MTLCommandBuffer> presentation=[queue commandBuffer];
         if (presentation) {
-            if (show && !copy(presentation,ctx.generated,generated.texture)) show=NO;
+            if (show && !copy(presentation,ctx.generated,generated.texture)) {
+                show=NO;
+                [ctx.lock lock]; ctx.lastNativeDeadline=fallbackNative; [ctx.lock unlock];
+            }
             if (show) {
                 [generated addPresentedHandler:^(id<MTLDrawable> shown) {
                     if (shown.presentedTime<=0 || generation!=atomic_load(&epoch)) return;
@@ -214,23 +224,27 @@ int madeira_interpolation_present(id<MTLCommandBuffer> buffer,id<CAMetalDrawable
                 }];
                 [presentation presentDrawable:generated atTime:times.generated];
                 [presentation presentDrawable:drawable atTime:times.native];
-            } else [presentation presentDrawable:drawable];
+            } else if (fallbackNative>0) [presentation presentDrawable:drawable atTime:fallbackNative];
+            else [presentation presentDrawable:drawable];
             [presentation addCompletedHandler:^(id<MTLCommandBuffer> retired) {
                 if (retired.status!=MTLCommandBufferStatusCompleted) status(9);
                 [ctx.lock lock]; ctx.busy=NO; if (!atomic_load(&gateEnabled) || generation!=atomic_load(&epoch)) [ctx discard]; [ctx.lock unlock];
             }];
             [presentation commit];
         } else {
-            [drawable present]; show=NO;
+            [ctx.lock lock]; ctx.lastNativeDeadline=fallbackNative; [ctx.lock unlock];
+            if (fallbackNative>0) [drawable presentAtTime:fallbackNative];
+            else [drawable present];
+            show=NO;
             [ctx.lock lock]; ctx.busy=NO; [ctx discard]; [ctx.lock unlock];
         }
         if (generation==atomic_load(&epoch)) {
             pthread_mutex_lock(&metricsLock);
             counters.gpu_ms=healthy && gpu>0?gpu*1000:0;
-            if (show) { counters.scheduled++; counters.status=3; counters.added_latency_ms=500.0/fps; }
+            if (show) { counters.scheduled++; counters.status=3; counters.added_latency_ms=(times.native-times.generated)*1000; }
             else { counters.skipped++; counters.status=!active?1:(!healthy?9:(!confident?8:10)); counters.added_latency_ms=0; }
             pthread_mutex_unlock(&metricsLock);
         }
     }];
-    return synthesized; // Only the paired path takes ownership of native presentation.
+    return ownsPresentation; // Also preserve ordering when a prior native frame is scheduled in the future.
 }
