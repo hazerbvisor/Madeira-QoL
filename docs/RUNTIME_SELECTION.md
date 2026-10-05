@@ -125,6 +125,12 @@ the same harness against the earlier source fails with an out-of-bounds
 register access. The rebuilt native handler logs `[arm64-context]
 register-members-v1` once during startup to identify this revision.
 
+The rebuild also exposed a build-script dependency on the macOS Wine
+configuration enabling GnuTLS. The iOS script now explicitly enables its
+statically linked crypto providers, checks their exported function tables and
+refuses to archive failed compilations. This repairs fresh-build linking; it
+does not explain the already-linked IPA's device startup failure.
+
 This is a verified native bounds fix and a candidate for the compiler-dependent
 startup regression, **not a confirmed fix for ETS2**. The logs do not identify
 which earlier instruction wrote the invalid guest return address. Device
