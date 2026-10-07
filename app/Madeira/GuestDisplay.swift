@@ -14,7 +14,7 @@ import Foundation
 
 /// How the guest surface is mapped into the view's bounds.
 enum DisplayMode: String, CaseIterable {
-    case fit, fill, stretch, aspect
+    case fit, fill, stretch, aspect, integer
 
     /// Older settings stored "fitHeight" (Fill height); it behaved as Fit in
     /// landscape and is gone from the picker, so it decodes to Fit.
@@ -24,6 +24,7 @@ enum DisplayMode: String, CaseIterable {
         case "fill": self = .fill
         case "stretch": self = .stretch
         case "aspect": self = .aspect
+        case "integer": self = .integer
         default: return nil
         }
     }
@@ -34,6 +35,7 @@ enum DisplayMode: String, CaseIterable {
         case .fill:      return "Fill"
         case .stretch:   return "Stretch"
         case .aspect:    return "Aspect"
+        case .integer:   return "Integer pixels"
         }
     }
     var symbol: String {
@@ -42,6 +44,7 @@ enum DisplayMode: String, CaseIterable {
         case .fill:      return "arrow.up.left.and.arrow.down.right"
         case .stretch:   return "rectangle.expand.vertical"
         case .aspect:    return "rectangle.ratio.16.to.9"
+        case .integer:   return "number.square"
         }
     }
 }
@@ -53,34 +56,43 @@ enum GameSurfaceLayout {
     /// The rect, in `bounds`'s coordinate space, that the guest surface
     /// occupies for `mode`.
     ///
-    /// - Fit: the guest's shape, as large as fits, centred (letterbox).
+    /// - Fit: the drawable's shape when known, else the guest's; centred.
     /// - Fill: the guest's shape, covering `bounds`; one axis overflows and
     ///   is cropped.
     /// - Stretch: exactly `bounds`.
-    /// - Aspect: like Fit, but on the shape of what is actually presented
-    ///   (`aspect`, the swapchain drawable, i.e. the game's back buffer). A
-    ///   game whose back buffer is 4:3 on a 16:9 monitor is stretched by the
-    ///   layer in every other mode; here it is scaled uniformly. Falls back to
-    ///   the guest shape until a drawable size is known (`aspect == .zero`).
-    static func rect(guest: CGSize, aspect: CGSize = .zero, bounds: CGRect, mode: DisplayMode) -> CGRect {
+    /// - Aspect: retained as an alias for older profiles. Fit now also follows
+    ///   the real drawable so unusual game resolutions are never stretched.
+    /// - Integer: whole physical-pixel multiples; falls back to Fit when the
+    ///   drawable is larger than the available display pixels.
+    static func rect(guest: CGSize, aspect: CGSize = .zero, bounds: CGRect, mode: DisplayMode, pixelScale: CGFloat = 1) -> CGRect {
         guard guest.width > 0, guest.height > 0,
               bounds.width > 0, bounds.height > 0 else { return bounds }
         if mode == .stretch { return bounds }
-        let useDrawable = mode == .aspect && aspect.width > 0 && aspect.height > 0
+        let useDrawable = aspect.width > 0 && aspect.height > 0
         let shape = useDrawable ? aspect : guest
         let sx = bounds.width / shape.width, sy = bounds.height / shape.height
-        let scale = mode == .fill ? max(sx, sy) : min(sx, sy)
+        var scale = mode == .fill ? max(sx, sy) : min(sx, sy)
+        let integerPixels = mode == .integer && pixelScale > 0 && scale * pixelScale >= 1
+        if integerPixels {
+            scale = floor(scale * pixelScale) / pixelScale
+        }
         let w = shape.width * scale, h = shape.height * scale
-        return CGRect(x: bounds.minX + (bounds.width - w) / 2,
-                      y: bounds.minY + (bounds.height - h) / 2,
-                      width: w, height: h)
+        var x = bounds.minX + (bounds.width - w) / 2
+        var y = bounds.minY + (bounds.height - h) / 2
+        if integerPixels {
+            // Half-pixel centering on odd-sized displays defeats nearest
+            // scaling even when the width and height are whole multiples.
+            x = floor(x * pixelScale) / pixelScale
+            y = floor(y * pixelScale) / pixelScale
+        }
+        return CGRect(x: x, y: y, width: w, height: h)
     }
 
     /// A point in `bounds`'s coordinate space (a touch) in guest pixels for
     /// `mode`, clamped to the guest surface; a touch in Fill's cropped margin
     /// clamps to the nearest edge.
-    static func map(point: CGPoint, guest: CGSize, aspect: CGSize = .zero, bounds: CGRect, mode: DisplayMode) -> CGPoint {
-        let r = rect(guest: guest, aspect: aspect, bounds: bounds, mode: mode)
+    static func map(point: CGPoint, guest: CGSize, aspect: CGSize = .zero, bounds: CGRect, mode: DisplayMode, pixelScale: CGFloat = 1) -> CGPoint {
+        let r = rect(guest: guest, aspect: aspect, bounds: bounds, mode: mode, pixelScale: pixelScale)
         guard r.width > 0, r.height > 0 else { return .zero }
         let x = (point.x - r.minX) * guest.width / r.width
         let y = (point.y - r.minY) * guest.height / r.height

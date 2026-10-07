@@ -165,9 +165,14 @@ final class MetalBackedView: UIView {
     /// window-level host view gets THIS frame, not our full bounds, and touch
     /// mapping uses the same rect, so letterboxing, cropping and stretching
     /// never skew input.
+    private var presentationBounds: CGRect {
+        let profile = LibraryModel.shared.activeEntry?.performanceUpgrade
+        return profile?.fullscreen == false ? bounds.inset(by: safeAreaInsets) : bounds
+    }
+
     private func gameRect() -> CGRect {
         let r = GameSurfaceLayout.rect(guest: guestSize(), aspect: drawableAspect(),
-                                       bounds: bounds, mode: effectiveDisplayMode())
+                                       bounds: presentationBounds, mode: effectiveDisplayMode(), pixelScale: window?.screen.scale ?? 1)
         return CGRect(x: r.minX, y: r.minY, width: max(r.width, 1), height: max(r.height, 1))
     }
 
@@ -181,6 +186,9 @@ final class MetalBackedView: UIView {
         guard let w = window else { return }
         let r = gameRect()
         MetalHostView.shared.frame = convert(r, to: w)
+        let nearest = effectiveDisplayMode() == .integer
+        MetalHostView.shared.metalLayer.magnificationFilter = nearest ? .nearest : .linear
+        MetalHostView.shared.metalLayer.minificationFilter = nearest ? .nearest : .linear
         // The desktop compositor lays the guest display out in the same rect,
         // so Aspect / Fill / Stretch / Fit apply to desktop sessions as well.
         winios_set_desktop_rect(r.minX - bounds.minX, r.minY - bounds.minY, r.width, r.height, 1)
@@ -266,6 +274,11 @@ final class MetalBackedView: UIView {
         }
     }
 
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        applyDisplayMode(reason: "safe-area")
+    }
+
     // Map a touch in view-local points to guest pixels through the same
     // GameSurfaceLayout math that sizes the presented layer, then post to
     // winios.drv. Off-surface touches (letterbox, Fill's cropped margin)
@@ -286,7 +299,7 @@ final class MetalBackedView: UIView {
             return (px, py)
         }
         let g = GameSurfaceLayout.map(point: p, guest: guestSize(), aspect: drawableAspect(),
-                                      bounds: bounds, mode: effectiveDisplayMode())
+                                      bounds: presentationBounds, mode: effectiveDisplayMode(), pixelScale: window?.screen.scale ?? 1)
         return (Int32(g.x), Int32(g.y))
     }
 
@@ -1311,7 +1324,7 @@ struct ContentView: View {
         }
         .ignoresSafeArea()
         .background(Color.black)
-        .statusBarHidden(true)
+        .statusBarHidden(library.activeEntry?.performanceUpgrade?.fullscreen ?? true)
     }
 
     /// Portrait: classic tooling layout — header, badges, 240pt game strip,
@@ -3561,6 +3574,7 @@ final class TouchControlsModel: ObservableObject {
     @Published var visible = true               { didSet { save() } }
     @Published var editing = false {            // transient, never persisted
         didSet {
+            if oldValue != editing { HardwareInput.shared.sessionFocusChanged() }
             // ml1970: an ended edit is written back to the custom layout it came from.
             if !oldValue && editing { editBaseline = controls }
             if oldValue && !editing { ControlPresetsModel.shared.editingEnded(baseline: editBaseline) }
@@ -4083,11 +4097,14 @@ struct TouchControlButton: View {
                 }
             }
         }
-        .onDisappear { if control.action.isPad { padVector = .zero; isDown = false } }
-        .onChange(of: m.editing) { _, _ in if control.action.isPad { padVector = .zero; isDown = false } }
-        .onChange(of: screen) { _, _ in if control.action.isPad { padVector = .zero; isDown = false } }
-        .onChange(of: control.action) { old, new in
-            if old.isPad || new.isPad { padVector = .zero; isDown = false }
+        .onDisappear { releaseGesture(control.action) }
+        .onChange(of: m.editing) { _, _ in releaseGesture(control.action) }
+        .onChange(of: screen) { _, _ in releaseGesture(control.action) }
+        .onChange(of: control.action) { old, _ in
+            releaseGesture(old)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            releaseGesture(control.action)
         }
         .position(x: CGFloat(control.nx) * screen.width,
                   y: CGFloat(control.ny) * screen.height)
@@ -4101,6 +4118,8 @@ struct TouchControlButton: View {
                         let b = dragBase ?? .zero
                         m.controls[i].nx = min(max(b.x + Double(v.translation.width  / screen.width),  0.03), 0.97)
                         m.controls[i].ny = min(max(b.y + Double(v.translation.height / screen.height), 0.03), 0.97)
+                    } else if UIApplication.shared.applicationState != .active || LibraryModel.shared.blocksGameplayTouch {
+                        releaseGesture(control.action)
                     } else if let q = control.action.stickKeys {
                         isDown = true
                         applyStick(snap(v.translation), q)
@@ -4158,11 +4177,22 @@ struct TouchControlButton: View {
         stickDir = next
     }
 
+    /// SwiftUI can remove or remap a pressed control without ending its drag.
+    /// Release the old action exactly once, including stick diagonals.
+    private func releaseGesture(_ action: ControlAction) {
+        if let q = action.stickKeys {
+            applyStick(-1, q)
+        } else if isDown && !action.isPad {
+            press(false, action: action)
+        }
+        isDown = false; padVector = .zero; dragBase = nil
+    }
+
     /// Haptic on the DOWN edge only — a held movement key would otherwise buzz
     /// continuously for as long as you walk.
-    private func press(_ down: Bool) {
+    private func press(_ down: Bool, action: ControlAction? = nil) {
         if down { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
-        switch control.action {
+        switch action ?? control.action {
         case .key(let vk):
             winios_post_key(vk, down ? 1 : 0)
         case .mouseLeft:

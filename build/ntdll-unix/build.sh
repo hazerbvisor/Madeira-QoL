@@ -97,9 +97,11 @@ compile_unixlib "$WINE_SRC/dlls/ws2_32/unixlib.c" "ws2_32_unixlib" "ws2_32" \
     -I"$WINE_SRC/dlls/ws2_32"
 compile_unixlib "$WINE_SRC/dlls/bcrypt/gnutls.c" "bcrypt_unixlib" "bcrypt" \
     -I"$WINE_SRC/dlls/bcrypt" -I"$GNUTLS_PREFIX/include" \
+    -DHAVE_GNUTLS_CIPHER_INIT=1 -DSONAME_LIBGNUTLS='"libgnutls.dylib"' \
     -include "$CRYPTO_DIR/ios_gnutls_shim.h"
 compile_unixlib "$WINE_SRC/dlls/secur32/schannel_gnutls.c" "secur32_unixlib" "secur32" \
     -I"$WINE_SRC/dlls/secur32" -I"$GNUTLS_PREFIX/include" \
+    -DSONAME_LIBGNUTLS='"libgnutls.dylib"' \
     -include "$CRYPTO_DIR/ios_gnutls_shim.h"
 # iOS-Madeira ml494 (#61 text wall): dwrite had NO unixlib, so every
 # __wine_unix_call from dwrite.dll failed and get_glyph_bbox never ran —
@@ -202,7 +204,22 @@ echo ""
 echo "Results: $SUCCEEDED succeeded, $FAILED failed"
 if [ -n "$FAILED_FILES" ]; then
     echo "Failed:$FAILED_FILES"
+    echo "Refusing to archive failed ntdll build" >&2
+    exit 1
 fi
+
+# The macOS Wine configuration can legitimately disable GnuTLS. This iOS
+# archive uses our static GnuTLS build, so a successful empty translation unit
+# must not pass as a working crypto provider.
+for prefix in bcrypt secur32; do
+    symbols=$(xcrun -sdk iphoneos nm -g -U "$OBJ_DIR/${prefix}_unixlib.o")
+    for suffix in unix_call_funcs unix_call_wow64_funcs; do
+        if ! awk -v symbol="_${prefix}_${suffix}" '$NF == symbol { found = 1 } END { exit !found }' <<< "$symbols"; then
+            echo "Missing native crypto table: ${prefix}_${suffix}" >&2
+            exit 1
+        fi
+    done
+done
 
 echo ""
 echo "=== Building libntdll_unix.a ==="

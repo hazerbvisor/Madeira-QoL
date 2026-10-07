@@ -1,0 +1,51 @@
+# PR #2 unsigned app preview
+
+This bundle contains the compiled Madeira app from PR #2, including performance
+profiles, local DXMT Spatial upscaling and experimental optical-flow interpolation.
+It is built from source commit `146739447489f252df916b0e3d5b9c2f4d9b322c`.
+
+The repository preview below omits the separately supplied Microsoft x64 runtime
+DLLs. Its `x86_64-vcruntime` directory is empty, so it is insufficient for games
+that require those implementations. Supply the official files as described in
+[the runtime instructions](../../tools/fetch-vcruntime.md), and verify the final
+IPA with `tools/verify-vcruntime.py` before installation. The runtime-complete
+replacement delivered through Google Drive retains this preview's app/helper
+binaries and adds all twelve unmodified DLLs plus Microsoft's license.
+
+[Download PR #2 as ZIP, including both app archive parts](https://github.com/hazerbvisor/Madeira-QoL/archive/refs/heads/feature/madeira-performance-upgrade.zip)
+
+1. Download the ZIP and unzip it. Open its `packages/pr2` folder.
+2. Keep `Madeira-PR2-unsigned.7z.001` and `Madeira-PR2-unsigned.7z.002` together.
+   Open the **.001** file using an archive app that supports multi-volume 7z.
+   Both parts are required; the archive app reads the second automatically.
+   iPad Files can unzip the outer ZIP, but needs a 7z-capable app for this step.
+3. Extract `Madeira-PR2-unsigned.ipa`. The archive also includes its checksum,
+   build provenance and instructions. No compilation or manual file joining
+   is needed. Sign/install the unsigned IPA with your usual sideloading tool.
+4. For ETS2, choose its DirectX 11 mode and select **MadeiraFX → Game renderer →
+   Direct3D 11 (DXMT)**. This permits settings when automatic detection is unknown.
+   Select **Quality** for Spatial upscaling, then relaunch.
+5. To try interpolation, select **MadeiraFX → Frame interpolation → 2×
+   (experimental)**, set a **30 FPS cap**, and relaunch. Admission requires stable
+   native pacing, GPU headroom and compatible SDR output.
+
+Alternatively, download the two parts directly into the same folder:
+
+- [Part 1](https://github.com/hazerbvisor/Madeira-QoL/raw/refs/heads/feature/madeira-performance-upgrade/packages/pr2/Madeira-PR2-unsigned.7z.001)
+- [Part 2](https://github.com/hazerbvisor/Madeira-QoL/raw/refs/heads/feature/madeira-performance-upgrade/packages/pr2/Madeira-PR2-unsigned.7z.002)
+- [Part checksums](SHA256SUMS)
+
+The complete archive is about 65 MB. The two parts fit the GitHub upload API's
+size limit. Its IPA uses standard uncompressed ZIP entries; extracted app files
+and their permissions match the tested compressed IPA exactly. The expanded IPA
+is roughly 508 MiB, so allow enough space for extraction and installation.
+
+This preview includes broader background renderer detection, a saved per-game
+renderer choice, and specific disabled reasons. The renderer choice records
+intent; effects still require actual local DXMT frames and device support.
+
+The full app/helper rebuild and affected frontend, renderer detection and spatial
+routing tests passed; the earlier 14-suite interpolation checkpoint also passed. Actual Metal execution,
+iPad image quality and displayed cadence remain unverified. See
+[the implementation report](../../docs/PERFORMANCE_IMPLEMENTATION.md) and
+[PR #2](https://github.com/hazerbvisor/Madeira-QoL/pull/2).

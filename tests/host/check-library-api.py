@@ -61,6 +61,21 @@ large[0] = 0x4d; large[1] = 0x5a
 large.append(Data("OPENGL32.DLL\0".utf8))
 let tail = try! scan(large)
 assert(tail.0 == ["OpenGL"] && tail.1 == 24 * 1024 * 1024)
+// A renderer name in a PE data section outside both original scan windows.
+var pe = Data(repeating: 0, count: 12 * 1024 * 1024)
+pe[0]=0x4d;pe[1]=0x5a
+func put32(_ value: UInt32, at offset: Int) { for i in 0..<4 { pe[offset+i]=UInt8((value >> (i*8)) & 255) } }
+put32(0x80, at:60);put32(0x4550, at:0x80);pe[0x86]=1;pe[0x94]=0xf0
+let section=0x80+24+0xf0
+pe.replaceSubrange(section..<(section+8),with:Data([0x2e,0x72,0x64,0x61,0x74,0x61,0,0]))
+put32(4*1024*1024,at:section+16);put32(5*1024*1024,at:section+20)
+let dll=Data("D3D11.DLL\0".utf8)
+pe.replaceSubrange((6*1024*1024)..<(6*1024*1024+dll.count),with:dll)
+let middle=try! scan(pe)
+assert(middle.0 == ["D3D11"] && middle.1 >= 0)
+assert(try! scan(pe,budget:32).0.isEmpty) // bounded budget cannot reach an arbitrary section name
+put32(0xfffffff0,at:section+20)
+assert(try! scan(pe).0.isEmpty) // malformed section offset preserves safe head/tail fallback
 assert(try! scan(large, budget: 2).0.isEmpty)
 assert(try! scan(large, budget: 0).1 == 0)
 assert(LibraryRendererBadge.compact("D3D9") == "D3D9")

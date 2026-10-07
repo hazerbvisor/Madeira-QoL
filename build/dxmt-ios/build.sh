@@ -18,7 +18,7 @@ OUT_LIB="$BUILD_DIR/libdxmt_unix.a"
 mkdir -p "$OBJ_DIR"
 
 COMMON_FLAGS="-arch arm64 -isysroot $SDK -miphoneos-version-min=18.0 -fblocks -O2"
-INCLUDES="-I$DXMT_ROOT/include -I$DXMT_ROOT/libs -I$DXMT_SRC/winemetal -I$DXMT_SRC/airconv"
+INCLUDES="-I$REPO_ROOT/app/Madeira -iquote $DXMT_SRC/winemetal/unix -I$DXMT_ROOT/include -I$DXMT_ROOT/libs -I$DXMT_SRC/winemetal -I$DXMT_SRC/airconv"
 INCLUDES_DIRECTX="-I$DXMT_ROOT/include/native/directx -I$DXMT_ROOT/include/native/windows"
 INCLUDES_SHADERS="-I$BUILD_DIR/shader-headers"
 LLVM_INCLUDES="-I$LLVM_BUILD/include -I$LLVM_SRC/include"
@@ -39,7 +39,7 @@ CXX_FLAGS="-std=c++20 -fno-exceptions -fno-rtti"
 # (winemetal_unix.c:5084), so point it at the real symbol on the command line
 # rather than editing either file.
 MADEIRA_DEFS="-DDXMT_NATIVE=1 -DDXMT_MADEIRA=1 -DDXMT_IOS=1 -DDXMT_PAGE_SIZE=4096 -DNOMINMAX"
-MADEIRA_INCLUDES="-I$DXMT_SRC/nativemetal -I$DXMT_ROOT/include -I$DXMT_ROOT/libs \
+MADEIRA_INCLUDES="-I$REPO_ROOT/app/Madeira -I$DXMT_SRC/nativemetal -I$DXMT_ROOT/include -I$DXMT_ROOT/libs \
  -I$DXMT_SRC/winemetal -I$DXMT_SRC/airconv -I$DXMT_SRC/util -I$DXMT_SRC/dxmt \
  -I$DXMT_SRC/d3d9 -I$DXMT_SRC/d3d9/unix -I$DXMT_SRC/d3d9shim"
 # The frontend throws (MTLD3DError) and the imported code uses dynamic_cast,
@@ -88,6 +88,7 @@ compile_cxx() {
 # MADEIRA: the native D3D9 frontend and its substrate (section 8.10 step 1).
 compile_madeira_cxx() {
     local src=$1 name=$2 extra="${3:-}"
+    if [ -n "${MADEIRA_ONLY:-}" ] && [ "$name" != "$MADEIRA_ONLY" ]; then return 0; fi
     printf "  %-40s " "$name"
     if xcrun -sdk iphoneos clang++ $COMMON_FLAGS $MADEIRA_CXX_FLAGS $MADEIRA_WARNINGS \
         $MADEIRA_INCLUDES $INCLUDES_DIRECTX $INCLUDES_SHADERS $MADEIRA_DEFS $extra \
@@ -100,6 +101,7 @@ compile_madeira_cxx() {
 
 compile_madeira_c() {
     local src=$1 name=$2 extra="${3:-}"
+    if [ -n "${MADEIRA_ONLY:-}" ] && [ "$name" != "$MADEIRA_ONLY" ]; then return 0; fi
     printf "  %-40s " "$name"
     if xcrun -sdk iphoneos clang $COMMON_FLAGS -std=c11 $MADEIRA_WARNINGS \
         $MADEIRA_INCLUDES $INCLUDES_DIRECTX $INCLUDES_SHADERS $MADEIRA_DEFS $extra \
@@ -161,7 +163,8 @@ else
 fi
 
 echo "=== winemetal unix (Objective-C) ==="
-compile_objc "$DXMT_SRC/winemetal/unix/winemetal_unix.c" winemetal_unix
+python3 "$BUILD_DIR/performance-overlay.py" "$DXMT_SRC/winemetal/unix/winemetal_unix.c" "$OBJ_DIR/performance/winemetal_unix.c"
+compile_objc "$OBJ_DIR/performance/winemetal_unix.c" winemetal_unix
 compile_objc "$DXMT_SRC/winemetal/unix/cache.c"          cache
 
 echo "=== airconv (C++ 20, needs LLVM headers) ==="
@@ -216,7 +219,9 @@ echo "=== MADEIRA: dxmt_madeira_native -- internal command library ==="
 # script's own timestamp is part of
 # the cache check so that a flag change here regenerates the header.
 DXMT_METAL_STD="${DXMT_METAL_STD:-metal3.1}"
-if [ ! -f "$BUILD_DIR/shader-headers/dxmt_command.h" ] \
+if [ -n "${MADEIRA_ONLY:-}" ] && [ "$MADEIRA_ONLY" != dxmt_command ] && [ -f "$BUILD_DIR/shader-headers/dxmt_command.h" ]; then
+    echo "  dxmt_command.h                           UNCHANGED (single-object rebuild)"
+elif [ ! -f "$BUILD_DIR/shader-headers/dxmt_command.h" ] \
    || [ "$DXMT_SRC/dxmt/dxmt_command.metal" -nt "$BUILD_DIR/shader-headers/dxmt_command.h" ] \
    || [ "$0" -nt "$BUILD_DIR/shader-headers/dxmt_command.h" ]; then
     mkdir -p "$BUILD_DIR/shader-headers"
@@ -264,7 +269,12 @@ for cpp in dxmt_format.cpp dxmt_names.cpp dxmt_command_queue.cpp dxmt_command.cp
            dxmt_resource_initializer.cpp dxmt_mem_census.cpp dxmt_bcn.cpp \
            dxmt_shader_cache.cpp; do
     name=$(basename "$cpp" .cpp)
-    compile_madeira_cxx "$DXMT_SRC/dxmt/$cpp" "$name"
+    if [ "$cpp" = dxmt_presenter.cpp ]; then
+        python3 "$BUILD_DIR/performance-overlay.py" "$DXMT_SRC/dxmt/$cpp" "$OBJ_DIR/performance/$cpp"
+        compile_madeira_cxx "$OBJ_DIR/performance/$cpp" "$name"
+    else
+        compile_madeira_cxx "$DXMT_SRC/dxmt/$cpp" "$name"
+    fi
 done
 
 echo "=== MADEIRA: dxmt_madeira_native -- d3d9 frontend ==="

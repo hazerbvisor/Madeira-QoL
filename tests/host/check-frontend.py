@@ -91,13 +91,21 @@ var published: (Int32, Int32) = (0, 0)
 func winios_display_mode_changed(_ w: Int32, _ h: Int32) { published = (w, h) }
 var vsync: Int32 = -1
 func madeira_set_vsync_locked(_ mode: Int32) { vsync = mode }
+func madeira_performance_renderer_available() -> Int32 { 1 }
 enum ProMotionIntent { static var has30Cap = true }
 struct TouchControl: Codable, Equatable { var nx = 0.5 }
 enum ControlAction: Codable, Equatable, Hashable { case none }   // LibraryEntry.controllerBinds
 enum GamepadInput { static let keyboardMouseAvailable = true }   // LibraryEntry's per-game DirectInput choice
 enum LibraryError: LocalizedError { case message(String) }
+enum RendererCaches { static func prepare(_ entry: LibraryEntry) {} }
+var spatialDevice: Int32 = 0
+var interpolationMode: Int32 = 0
+func madeira_interpolation_configure(_ mode: Int32) { interpolationMode = mode }
+func madeira_spatial_supported() -> Int32 { spatialDevice }
+func madeira_spatial_configure(_ enabled: Int32, _ width: Int32, _ height: Int32) -> Int32 { enabled * spatialDevice }
 func env(_ name: String) -> String? { getenv(name).map { String(cString: $0) } }
 '''
+swift += (root / 'app/Madeira/PerformancePolicy.swift').read_text() + '\n'
 swift += block(lib, 'struct LibraryEntry: Codable, Identifiable') + '\n'
 swift += block(lib, 'enum SyncEngine: String, CaseIterable, Identifiable') + '\n'
 swift += '\n'.join(l for l in display.splitlines() if not l.startswith('import ')) + '\n'
@@ -235,6 +243,78 @@ expect(odd.displayMode == .fit, "an unknown display mode falls back to Fit")
 let saved = try? JSONEncoder().encode(forked!)
 let again = saved.flatMap { try? JSONDecoder().decode(LibraryEntry.self, from: $0) }
 expect(again?.display == "aspect" && again?.controlSize == 1.5, "the profile encodes its display and control choices")
+var inputProfile = forked!
+inputProfile.performanceUpgrade = PerformanceProfile()
+inputProfile.performanceUpgrade?.fullscreen = false
+inputProfile.performanceUpgrade?.mouseCapture = .manual
+inputProfile.performanceUpgrade?.mouseSensitivity = 2.5
+inputProfile.display = "integer"
+let inputSaved = try! JSONEncoder().encode(inputProfile)
+let inputBack = try! JSONDecoder().decode(LibraryEntry.self, from: inputSaved)
+expect(inputBack.performanceUpgrade?.fullscreen == false && inputBack.performanceUpgrade?.mouseCapture == .manual
+       && inputBack.performanceUpgrade?.mouseSensitivity == 2.5 && inputBack.displayMode == .integer,
+       "per-executable fullscreen, capture, sensitivity and integer settings survive persistence")
+expect(forked?.performanceUpgrade == nil, "older profiles preserve original input and fullscreen defaults")
+var unsupportedFX = inputProfile
+unsupportedFX.performanceUpgrade?.fxMode = .quality
+unsupportedFX.performanceUpgrade?.renderScale = 0.85
+expect(unsupportedFX.sessionResolution == unsupportedFX.resolution,
+       "unsupported MetalFX retains the original session resolution")
+spatialDevice = 1
+MadeiraConfig.values["d3d9"] = "native"
+var nativeFX = unsupportedFX; nativeFX.bits = 32; nativeFX.graphicsAPI = "D3D9"
+let nativeSize = nativeFX.performanceUpgrade!.internalResolution(outputWidth: 1560, outputHeight: 720)
+expect(nativeFX.spatialCompatible && nativeFX.sessionResolution == "\(nativeSize.width)x\(nativeSize.height)",
+       "native 32-bit D3D9 requests the explicit lower monitor")
+nativeFX.performanceUpgrade?.interpolation = .double
+nativeFX.configureLaunch()
+expect(interpolationMode == 1, "local D3D9 starts the optical-flow backend independently of Spatial")
+expect(env("DXMT_METALFX_SPATIAL_SWAPCHAIN") == "0", "one host spatial path suppresses the independent guest upscaler")
+nativeFX.bits = 64
+expect(nativeFX.spatialCompatible && nativeFX.sessionResolution != nativeFX.resolution, "64-bit D3D9 uses the native drawable-texture bridge")
+nativeFX.bits = 32; nativeFX.graphicsAPI = "D3D11"
+expect(nativeFX.spatialCompatible, "D3D11 guest Presenter uses the shared drawable-texture bridge")
+nativeFX.graphicsAPI = "D3D11/D3D9"
+expect(nativeFX.spatialCompatible, "mixed D3D11/D3D9 metadata uses two supported DXMT paths")
+nativeFX.graphicsAPI = " D3D11 / D3D9 "
+expect(nativeFX.spatialCompatible && nativeFX.spatialCompatibilityIssue == nil, "PE-import renderer labels with spaces admit the two supported DXMT APIs")
+nativeFX.graphicsAPI = "OpenGL / D3D11"
+expect(nativeFX.spatialCompatible, "a game offering OpenGL and Direct3D 11 can configure its DXMT path")
+nativeFX.performanceUpgrade?.interpolation = .double
+nativeFX.configureLaunch(); expect(interpolationMode == 1, "multi-renderer games can request interpolation on their DXMT path")
+nativeFX.graphicsAPI = "D3D11 / D3D12"
+expect(nativeFX.spatialCompatible, "a DX11/DX12 game can configure DX11 without claiming DX12 support")
+nativeFX.graphicsAPI = nil
+expect(!nativeFX.spatialCompatible && nativeFX.spatialCompatibilityIssue?.contains("not identified") == true, "unknown renderer stays disabled with an actionable reason")
+nativeFX.performanceUpgrade?.fxRenderer = .d3d11
+expect(nativeFX.spatialCompatible && nativeFX.graphicsAPI == nil, "explicit DX11 intent admits unknown metadata without fabricating an API observation")
+nativeFX.configureLaunch(); expect(interpolationMode == 1, "explicit DX11 intent configures the local interpolation backend")
+nativeFX.desktop = true; expect(!nativeFX.spatialCompatible, "renderer hint cannot bypass desktop exclusion")
+nativeFX.desktop = false; MadeiraConfig.values["remote"] = "host token"
+expect(!nativeFX.spatialCompatible, "renderer hint cannot bypass remote exclusion")
+MadeiraConfig.values["remote"] = nil; nativeFX.bits = 0
+expect(!nativeFX.spatialCompatible, "renderer hint cannot bypass unknown executable architecture")
+nativeFX.bits = 32; nativeFX.performanceUpgrade?.fxRenderer = .automatic
+nativeFX.graphicsAPI = "OpenGL"
+expect(!nativeFX.spatialCompatible && nativeFX.spatialCompatibilityIssue?.contains("OpenGL") == true, "OpenGL-only entries stay disabled with their detected renderer")
+nativeFX.graphicsAPI = "D3D9"; MadeiraConfig.values["d3d9"] = "emulated"
+expect(nativeFX.spatialCompatible, "emulated i386 Presenter uses the same native drawable-texture bridge")
+nativeFX.graphicsAPI = "D3D12"
+expect(!nativeFX.spatialCompatible, "unvalidated D3D12 is excluded")
+nativeFX.configureLaunch(); expect(interpolationMode == 0, "D3D12 excludes optical-flow launch")
+nativeFX.graphicsAPI = "D3D9"; nativeFX.desktop = true
+expect(!nativeFX.spatialCompatible, "desktop composition is excluded")
+nativeFX.configureLaunch(); expect(interpolationMode == 0, "desktop excludes optical-flow launch")
+nativeFX.desktop = false
+MadeiraConfig.values["d3d9"] = "native"; MadeiraConfig.values["remote"] = "diagnostic remote backend"
+expect(!nativeFX.spatialCompatible, "remote Metal handles are excluded from local MetalFX")
+nativeFX.configureLaunch(); expect(interpolationMode == 0, "remote Metal excludes optical-flow launch")
+MadeiraConfig.values["remote"] = nil; nativeFX.performanceUpgrade?.fxMode = .off
+nativeFX.performanceUpgrade?.interpolation = .auto
+nativeFX.configureLaunch(); expect(interpolationMode == 2, "Auto optical flow does not require Spatial upscaling")
+nativeFX.performanceUpgrade?.interpolation = .off
+nativeFX.configureLaunch(); expect(interpolationMode == 0, "Off launch resets previous interpolation mode")
+MadeiraConfig.values["d3d9"] = nil; MadeiraConfig.values["remote"] = nil; spatialDevice = 0
 
 // Layout: the presented rect and the touch mapping for each mode.
 let guest = CGSize(width: 1280, height: 720), view = CGRect(x: 0, y: 0, width: 844, height: 390)
@@ -258,7 +338,26 @@ let phone = GuestDisplay.defaultMode(forLandscapeView: CGSize(width: 844, height
 let tablet = GuestDisplay.defaultMode(forLandscapeView: CGSize(width: 1024, height: 768))
 expect(phone.w == 1280 && phone.h == 720, "phone default mode is 1280x720")
 expect(tablet.w == 1152 && tablet.h == 864, "4:3 default mode is 1152x864 (cheapest 4:3 of at least 0.9 MP)")
-expect(DisplayMode.allCases.map { $0.label } == ["Fit", "Fill", "Stretch", "Aspect"], "the four Aspect & scaling choices")
+expect(DisplayMode.allCases.map { $0.label } == ["Fit", "Fill", "Stretch", "Aspect", "Integer pixels"], "scaling choices retain old profiles and add integer pixels")
+expect(GameSurfaceLayout.rect(guest: guest, aspect: drawn, bounds: view, mode: .fit) == aspect, "Fit preserves the real backbuffer aspect instead of stretching it")
+let integer = GameSurfaceLayout.rect(guest: guest, bounds: view, mode: .integer, pixelScale: 3)
+expect(near(integer.width * 3, guest.width) && near(integer.height * 3, guest.height), "integer scaling uses physical pixels, not UIKit points")
+let integerCenter = GameSurfaceLayout.map(point: CGPoint(x: integer.midX, y: integer.midY), guest: guest, bounds: view, mode: .integer, pixelScale: 3)
+expect(near(integerCenter.x, 640) && near(integerCenter.y, 360), "integer geometry and touch mapping agree")
+let oddBounds = CGRect(x: 0, y: 0, width: 845, height: 391)
+let oddInteger = GameSurfaceLayout.rect(guest: guest, bounds: oddBounds, mode: .integer, pixelScale: 3)
+expect(abs(oddInteger.minX * 3 - round(oddInteger.minX * 3)) < 0.001
+       && abs(oddInteger.minY * 3 - round(oddInteger.minY * 3)) < 0.001,
+       "integer centering stays on physical pixels for odd-sized viewports")
+for size in [CGSize(width: 1024, height: 1366), CGSize(width: 1366, height: 1024), CGSize(width: 520, height: 600)] {
+    let safe = CGRect(x: 24, y: 32, width: size.width - 48, height: size.height - 64)
+    let unusual = CGSize(width: 1560, height: 720)
+    let layout = GameSurfaceLayout.rect(guest: unusual, bounds: safe, mode: .fit)
+    expect(safe.contains(layout) && abs(layout.width / layout.height - unusual.width / unusual.height) < 0.001,
+           "Fit preserves unusual resolutions in portrait, landscape and resized safe-area bounds")
+    let point = GameSurfaceLayout.map(point: CGPoint(x: layout.midX, y: layout.midY), guest: unusual, bounds: safe, mode: .fit)
+    expect(near(point.x, 780) && near(point.y, 360), "safe-area presentation and input share the same origin")
+}
 
 // Controller navigation.
 let c = LibraryController.shared

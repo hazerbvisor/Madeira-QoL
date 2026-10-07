@@ -39,40 +39,18 @@
 #ifdef WINE_IOS
 #include <dlfcn.h>
 #include <mach/mach.h>
+#include "ios_arm64_registers.h"
 
-/* iOS-Madeira ml674: XZR/WZR AS A STORE SOURCE MUST READ ZERO.
- *
- * arm_thread_state64_t is  __uint64_t __x[29]  followed by __fp, __lr, __sp --
- * so state.__x[31] is not out of bounds by accident, it lands EXACTLY on __sp.
- *
- * That makes register 31 behave correctly in one role and catastrophically in
- * the other:
- *   - as a BASE register (Rn), 31 means SP, and __x[31] IS __sp  -> correct
- *   - as a SOURCE register (Rt/Rt2/Rs), 31 means ZR              -> must be 0,
- *     but reads the stack pointer instead
- *
- * Because the base-register half works, the decoder reads as correct and this
- * survived a long time. What it actually did: every fault-emulated `str xzr` /
- * `stur xzr` / `stp xzr,xzr` into an alias-backed page wrote a STACK ADDRESS
- * where the guest asked for zero.
- *
- * Book of the Dead showed it precisely. RtlInitializeCriticalSectionEx emits
- *     stur xzr, [x19,#0x0c]      ; RecursionCount + half of OwningThread
- *     stur xzr, [x19,#0x14]      ; rest of OwningThread + half of LockSemaphore
- *     str  wzr, [x19,#0x1c]      ; rest of LockSemaphore
- * so a section on a Mono anon-RWX page was born holding SP fragments:
- *     RecursionCount = 0x23bbf660, LockSemaphore = 0x23bbf660_00000070
- * and the first NtReleaseSemaphore on it returned STATUS_INVALID_HANDLE.
- *
- * Scope is much wider than one crash: any zero-store into an alias-backed page
- * was corrupting memory this way. */
-#define IOS_STORE_SRC(r) ((r) == 31 ? 0ULL : state.__x[r])
+/* XZR/WZR source operands read zero. FP, LR and SP use their named
+ * Darwin members through IOS_ARM64_REG; never extend __x past x28. */
+#define IOS_STORE_SRC(r) ((r) == 31 ? 0ULL : IOS_ARM64_REG(state, r))
 
 #include <mach/mach_vm.h>
 #include <mach/thread_act.h>
 #include <pthread/pthread.h>
 #include <pthread/qos.h>
 #include <fcntl.h>
+#include "ios_crash_context.h"
 #endif
 #ifdef HAVE_SYS_PARAM_H
 # include <sys/param.h>
@@ -179,7 +157,7 @@ static DWORD64 get_fault_esr( ucontext_t *sigcontext )
 
 /* All Registers access - only for local access */
 # define REG_sig(reg_name, context) ((context)->uc_mcontext->__ss.__ ## reg_name)
-# define REGn_sig(reg_num, context) ((context)->uc_mcontext->__ss.__x[reg_num])
+# define REGn_sig(reg_num, context) IOS_ARM64_REG((context)->uc_mcontext->__ss, reg_num)
 
 /* Special Registers access  */
 # define SP_sig(context)            REG_sig(sp, context)    /* Stack pointer */
@@ -1788,13 +1766,13 @@ static void *ios_mach_exception_thread( void *arg )
                             dprintf(STDERR_FILENO,
                                     "[int3-guest]   HOST x%-2d=0x%016llx x%-2d=0x%016llx "
                                     "x%-2d=0x%016llx x%-2d=0x%016llx\n",
-                                    gi, (unsigned long long)bs.__x[gi],
-                                    gi + 1, (unsigned long long)(gi + 1 < 31 ? bs.__x[gi + 1] : 0),
-                                    gi + 2, (unsigned long long)(gi + 2 < 31 ? bs.__x[gi + 2] : 0),
-                                    gi + 3, (unsigned long long)(gi + 3 < 31 ? bs.__x[gi + 3] : 0));
+                                    gi, (unsigned long long)IOS_ARM64_REG(bs, gi),
+                                    gi + 1, (unsigned long long)(gi + 1 < 31 ? IOS_ARM64_REG(bs, gi + 1) : 0),
+                                    gi + 2, (unsigned long long)(gi + 2 < 31 ? IOS_ARM64_REG(bs, gi + 2) : 0),
+                                    gi + 3, (unsigned long long)(gi + 3 < 31 ? IOS_ARM64_REG(bs, gi + 3) : 0));
                         for (gi = 0; gi < 31; gi++)
                         {
-                            unsigned long long v = bs.__x[gi];
+                            unsigned long long v = IOS_ARM64_REG(bs, gi);
                             char a[9]; int k;
                             for (k = 0; k < 8; k++)
                             { unsigned char c = (unsigned char)(v >> (8 * k)); a[k] = (c >= 32 && c < 127) ? c : '.'; }
@@ -1883,6 +1861,7 @@ static void *ios_mach_exception_thread( void *arg )
                                           (thread_state_t)&neon_state, &neon_count) == KERN_SUCCESS);
         if (kr == KERN_SUCCESS)
         {
+            const arm_thread_state64_t fault_entry_state = state;
             uintptr_t fault_addr = (uintptr_t)req->code[1];
 #ifdef WINE_IOS
             /* ml939: THE SUB-FLOOR SERVICE BELONGS HERE, NOT IN segv_handler.
@@ -2310,7 +2289,7 @@ static void *ios_mach_exception_thread( void *arg )
                             int n = 0, k;
                             /* __x[] is x0..x28 only; fp/lr/sp are separate
                              * members and rn==31 is xzr/sp. Never index past 28. */
-                            uint64_t rn_val = (rn < 29) ? state.__x[rn] :
+                            uint64_t rn_val = (rn < 29) ? IOS_ARM64_REG(state, rn) :
                                               (rn == 29) ? state.__fp :
                                               (rn == 30) ? state.__lr : state.__sp;
                             ios_x18_decline_reports++;
@@ -2339,29 +2318,29 @@ static void *ios_mach_exception_thread( void *arg )
                         {
                         /* unsigned-offset immediate loads, base x18 */
                         case 0xf9400000: /* LDR Xt */
-                            if (rt != 31) state.__x[rt] = *(uint64_t *)ea;
+                            if (rt != 31) IOS_ARM64_REG(state, rt) = *(uint64_t *)ea;
                             emulated = 1; break;
                         case 0xb9400000: /* LDR Wt (zero-extend) */
-                            if (rt != 31) state.__x[rt] = *(uint32_t *)ea;
+                            if (rt != 31) IOS_ARM64_REG(state, rt) = *(uint32_t *)ea;
                             emulated = 1; break;
                         case 0x39400000: /* LDRB Wt */
-                            if (rt != 31) state.__x[rt] = *(uint8_t *)ea;
+                            if (rt != 31) IOS_ARM64_REG(state, rt) = *(uint8_t *)ea;
                             emulated = 1; break;
                         case 0x79400000: /* LDRH Wt */
-                            if (rt != 31) state.__x[rt] = *(uint16_t *)ea;
+                            if (rt != 31) IOS_ARM64_REG(state, rt) = *(uint16_t *)ea;
                             emulated = 1; break;
                         /* unsigned-offset immediate stores, base x18 */
                         case 0xf9000000: /* STR Xt */
-                            *(uint64_t *)ea = (rt == 31) ? 0 : state.__x[rt];
+                            *(uint64_t *)ea = (rt == 31) ? 0 : IOS_ARM64_REG(state, rt);
                             emulated = 1; break;
                         case 0xb9000000: /* STR Wt */
-                            *(uint32_t *)ea = (rt == 31) ? 0 : (uint32_t)state.__x[rt];
+                            *(uint32_t *)ea = (rt == 31) ? 0 : (uint32_t)IOS_ARM64_REG(state, rt);
                             emulated = 1; break;
                         case 0x39000000: /* STRB Wt */
-                            *(uint8_t *)ea = (rt == 31) ? 0 : (uint8_t)state.__x[rt];
+                            *(uint8_t *)ea = (rt == 31) ? 0 : (uint8_t)IOS_ARM64_REG(state, rt);
                             emulated = 1; break;
                         case 0x79000000: /* STRH Wt */
-                            *(uint16_t *)ea = (rt == 31) ? 0 : (uint16_t)state.__x[rt];
+                            *(uint16_t *)ea = (rt == 31) ? 0 : (uint16_t)IOS_ARM64_REG(state, rt);
                             emulated = 1; break;
                         default: break;
                         }
@@ -2370,15 +2349,15 @@ static void *ios_mach_exception_thread( void *arg )
                         if (!emulated && (insn & 0xffc00000) == 0xa9400000)
                         {
                             int rt2 = (insn >> 10) & 0x1f;
-                            if (rt != 31)  state.__x[rt]  = *(uint64_t *)ea;
-                            if (rt2 != 31) state.__x[rt2] = *(uint64_t *)(ea + 8);
+                            if (rt != 31)  IOS_ARM64_REG(state, rt)  = *(uint64_t *)ea;
+                            if (rt2 != 31) IOS_ARM64_REG(state, rt2) = *(uint64_t *)(ea + 8);
                             emulated = 1;
                         }
                         else if (!emulated && (insn & 0xffc00000) == 0xa9000000)
                         {
                             int rt2 = (insn >> 10) & 0x1f;
-                            *(uint64_t *)ea       = (rt == 31)  ? 0 : state.__x[rt];
-                            *(uint64_t *)(ea + 8) = (rt2 == 31) ? 0 : state.__x[rt2];
+                            *(uint64_t *)ea       = (rt == 31)  ? 0 : IOS_ARM64_REG(state, rt);
+                            *(uint64_t *)(ea + 8) = (rt2 == 31) ? 0 : IOS_ARM64_REG(state, rt2);
                             emulated = 1;
                         }
 
@@ -2397,7 +2376,7 @@ static void *ios_mach_exception_thread( void *arg )
                             emulated = 1;
                             if (opc == 0)               /* store */
                             {
-                                val = (rt == 31) ? 0 : state.__x[rt];
+                                val = (rt == 31) ? 0 : IOS_ARM64_REG(state, rt);
                                 switch (size)
                                 {
                                 case 0: *(uint8_t  *)ea = (uint8_t)val;  break;
@@ -2415,7 +2394,7 @@ static void *ios_mach_exception_thread( void *arg )
                                 case 2: val = *(uint32_t *)ea; break;
                                 case 3: val = *(uint64_t *)ea; break;
                                 }
-                                if (rt != 31) state.__x[rt] = val;
+                                if (rt != 31) IOS_ARM64_REG(state, rt) = val;
                             }
                             else if (size == 3 && opc == 2)
                             {
@@ -2432,7 +2411,7 @@ static void *ios_mach_exception_thread( void *arg )
                                 }
                                 if (opc == 3) /* 32-bit target: Wt, zero upper */
                                     sval = (int64_t)(uint32_t)(int32_t)sval;
-                                if (rt != 31) state.__x[rt] = (uint64_t)sval;
+                                if (rt != 31) IOS_ARM64_REG(state, rt) = (uint64_t)sval;
                             }
                         }
 
@@ -2717,7 +2696,7 @@ static void *ios_mach_exception_thread( void *arg )
                         uint32_t Rn = (insn >> 5) & 0x1F;
                         uint32_t Rt = insn & 0x1F;
                         uint64_t addr = (Rn == 31) ? __darwin_arm_thread_state64_get_sp(state)
-                                                   : state.__x[Rn];
+                                                   : IOS_ARM64_REG(state, Rn);
                         uint64_t val = 0;
                         mach_vm_size_t got = 0;
                         if (mach_vm_read_overwrite( mach_task_self(), addr, 1u << Size,
@@ -2725,7 +2704,7 @@ static void *ios_mach_exception_thread( void *arg )
                             && got == (1u << Size))
                         {
                             int mi, free_mi = -1;
-                            if (Rt != 31) state.__x[Rt] = val;
+                            if (Rt != 31) IOS_ARM64_REG(state, Rt) = val;
                             for (mi = 0; mi < IOS_EXCL_MON_SLOTS; mi++)
                             {
                                 if (ios_excl_mon[mi].valid && ios_excl_mon[mi].thr == thread) break;
@@ -2759,9 +2738,9 @@ static void *ios_mach_exception_thread( void *arg )
                         uint32_t Rn = (insn >> 5) & 0x1F;
                         uint32_t Rt = insn & 0x1F;
                         uint64_t addr = (Rn == 31) ? __darwin_arm_thread_state64_get_sp(state)
-                                                   : state.__x[Rn];
+                                                   : IOS_ARM64_REG(state, Rn);
                         uint64_t szmask = (Size == 3) ? ~0ULL : ((1ULL << (8u << Size)) - 1);
-                        uint64_t stval = (Rt == 31) ? 0 : (state.__x[Rt] & szmask);
+                        uint64_t stval = (Rt == 31) ? 0 : (IOS_ARM64_REG(state, Rt) & szmask);
                         uint64_t status = 1;   /* fail-by-default -> loop retries the LDAXR */
                         int mi;
                         for (mi = 0; mi < IOS_EXCL_MON_SLOTS; mi++)
@@ -2783,7 +2762,7 @@ static void *ios_mach_exception_thread( void *arg )
                         }
                         else if (mi < IOS_EXCL_MON_SLOTS)
                             ios_excl_mon[mi].valid = 0;
-                        if (Rs != 31) state.__x[Rs] = status;
+                        if (Rs != 31) IOS_ARM64_REG(state, Rs) = status;
                         __darwin_arm_thread_state64_set_pc_fptr(
                             state, (void *)(uintptr_t)(fault_pc + 4));
                         static volatile int sx_count;
@@ -2804,10 +2783,10 @@ static void *ios_mach_exception_thread( void *arg )
                         uint32_t Rn = (insn >> 5) & 0x1F;
                         uint32_t Rt = insn & 0x1F;
                         uint64_t addr = (Rn == 31) ? __darwin_arm_thread_state64_get_sp(state)
-                                                   : state.__x[Rn];
+                                                   : IOS_ARM64_REG(state, Rn);
                         uint64_t szmask = (Size == 3) ? ~0ULL : ((1ULL << (8u << Size)) - 1);
-                        uint64_t cmp = ((Rs == 31) ? 0 : state.__x[Rs]) & szmask;
-                        uint64_t stval = ((Rt == 31) ? 0 : state.__x[Rt]) & szmask;
+                        uint64_t cmp = ((Rs == 31) ? 0 : IOS_ARM64_REG(state, Rs)) & szmask;
+                        uint64_t stval = ((Rt == 31) ? 0 : IOS_ARM64_REG(state, Rt)) & szmask;
                         uint64_t cur = 0;
                         mach_vm_size_t got = 0;
                         if (mach_vm_read_overwrite( mach_task_self(), addr, 1u << Size,
@@ -2821,7 +2800,7 @@ static void *ios_mach_exception_thread( void *arg )
                                                          1u << Size ) == KERN_SUCCESS);
                             if ((cur & szmask) == cmp && !stored)
                                 goto skip_unaligned_backpatch;  /* write failed: honest AV path */
-                            if (Rs != 31) state.__x[Rs] = cur & szmask;  /* CAS returns old value in Rs */
+                            if (Rs != 31) IOS_ARM64_REG(state, Rs) = cur & szmask;  /* CAS returns old value in Rs */
                             __darwin_arm_thread_state64_set_pc_fptr(
                                 state, (void *)(uintptr_t)(fault_pc + 4));
                             static volatile int cas_count;
@@ -2883,7 +2862,7 @@ static void *ios_mach_exception_thread( void *arg )
                          *
                          * The ACCESS SIZE decides who is at fault, and the register
                          * value decides it beyond doubt, because the backpatch runs
-                         * BEFORE the store re-executes -- so state.__x[Rt] is exactly
+                         * BEFORE the store re-executes -- so IOS_ARM64_REG(state, Rt) is exactly
                          * the value about to be written:
                          *   size=4 (32-bit store) and Rt holds the full 64-bit
                          *     pointer  => the GUEST is storing only 32 bits by
@@ -2962,7 +2941,7 @@ static void *ios_mach_exception_thread( void *arg )
                                 uint32_t wSize = (insn >> 30) & 0x3u;
                                 uint32_t wRt   = insn & 0x1Fu;
                                 uint32_t wRn   = (insn >> 5) & 0x1Fu;
-                                uint64_t wval  = (wRt == 31) ? 0 : state.__x[wRt];
+                                uint64_t wval  = (wRt == 31) ? 0 : IOS_ARM64_REG(state, wRt);
                                 dprintf(STDERR_FILENO,
                                         "[writer] ml963 #%d %s addr=0x%llx (off=0x%03x) insn=0x%08x "
                                         "bytes=%u Rt=x%u Rn=x%u Rt_val=0x%016llx high32=0x%08llx pc=0x%llx -- %s\n",
@@ -3143,7 +3122,7 @@ static void *ios_mach_exception_thread( void *arg )
                             {
                                 base_new = base_old + (uint64_t)off;
                                 if (rn == 31) state.__sp = base_new;
-                                else          state.__x[rn] = base_new;
+                                else          IOS_ARM64_REG(state, rn) = base_new;
                             }
                             emulated = 1;
                             {
@@ -3273,7 +3252,7 @@ static void *ios_mach_exception_thread( void *arg )
                             int rn = (insn >> 5) & 0x1f;
                             int imm9 = (insn >> 12) & 0x1ff;
                             if (imm9 & 0x100) imm9 |= ~0x1ff;  // sign-extend 9-bit
-                            state.__x[rn] = (uint64_t)((int64_t)state.__x[rn] + imm9);
+                            IOS_ARM64_REG(state, rn) = (uint64_t)((int64_t)IOS_ARM64_REG(state, rn) + imm9);
                         }
                     }
                     /* STR (immediate, post/pre-index, 32-bit): 1011 1000 00 0imm9 0[10]1 Rn Rt */
@@ -3288,7 +3267,7 @@ static void *ios_mach_exception_thread( void *arg )
                             int rn = (insn >> 5) & 0x1f;
                             int imm9 = (insn >> 12) & 0x1ff;
                             if (imm9 & 0x100) imm9 |= ~0x1ff;
-                            state.__x[rn] = (uint64_t)((int64_t)state.__x[rn] + imm9);
+                            IOS_ARM64_REG(state, rn) = (uint64_t)((int64_t)IOS_ARM64_REG(state, rn) + imm9);
                         }
                     }
                     /* STRB (immediate, post/pre-index, 8-bit): 0011 1000 00 0imm9 0[10]1 Rn Rt
@@ -3306,7 +3285,7 @@ static void *ios_mach_exception_thread( void *arg )
                             int rn = (insn >> 5) & 0x1f;
                             int imm9 = (insn >> 12) & 0x1ff;
                             if (imm9 & 0x100) imm9 |= ~0x1ff;
-                            state.__x[rn] = (uint64_t)((int64_t)state.__x[rn] + imm9);
+                            IOS_ARM64_REG(state, rn) = (uint64_t)((int64_t)IOS_ARM64_REG(state, rn) + imm9);
                         }
                     }
                     /* STRH (immediate, post/pre-index, 16-bit): 0111 1000 00 0imm9 0[10]1 Rn Rt */
@@ -3321,7 +3300,7 @@ static void *ios_mach_exception_thread( void *arg )
                             int rn = (insn >> 5) & 0x1f;
                             int imm9 = (insn >> 12) & 0x1ff;
                             if (imm9 & 0x100) imm9 |= ~0x1ff;
-                            state.__x[rn] = (uint64_t)((int64_t)state.__x[rn] + imm9);
+                            IOS_ARM64_REG(state, rn) = (uint64_t)((int64_t)IOS_ARM64_REG(state, rn) + imm9);
                         }
                     }
                     /* SIMD/FP STR (immediate, post/pre-index, D-reg = 64-bit):
@@ -3342,7 +3321,7 @@ static void *ios_mach_exception_thread( void *arg )
                                 int rn = (insn >> 5) & 0x1f;
                                 int imm9 = (insn >> 12) & 0x1ff;
                                 if (imm9 & 0x100) imm9 |= ~0x1ff;
-                                state.__x[rn] = (uint64_t)((int64_t)state.__x[rn] + imm9);
+                                IOS_ARM64_REG(state, rn) = (uint64_t)((int64_t)IOS_ARM64_REG(state, rn) + imm9);
                             }
                         }
                     }
@@ -3361,7 +3340,7 @@ static void *ios_mach_exception_thread( void *arg )
                                 int rn = (insn >> 5) & 0x1f;
                                 int imm9 = (insn >> 12) & 0x1ff;
                                 if (imm9 & 0x100) imm9 |= ~0x1ff;
-                                state.__x[rn] = (uint64_t)((int64_t)state.__x[rn] + imm9);
+                                IOS_ARM64_REG(state, rn) = (uint64_t)((int64_t)IOS_ARM64_REG(state, rn) + imm9);
                             }
                         }
                     }
@@ -3380,7 +3359,7 @@ static void *ios_mach_exception_thread( void *arg )
                                 int rn = (insn >> 5) & 0x1f;
                                 int imm9 = (insn >> 12) & 0x1ff;
                                 if (imm9 & 0x100) imm9 |= ~0x1ff;
-                                state.__x[rn] = (uint64_t)((int64_t)state.__x[rn] + imm9);
+                                IOS_ARM64_REG(state, rn) = (uint64_t)((int64_t)IOS_ARM64_REG(state, rn) + imm9);
                             }
                         }
                     }
@@ -3520,7 +3499,7 @@ static void *ios_mach_exception_thread( void *arg )
                         }
                         else
                         {
-                            uint64_t in = (rs == 31) ? 0 : state.__x[rs];
+                            uint64_t in = (rs == 31) ? 0 : IOS_ARM64_REG(state, rs);
                             uint64_t old;
                             switch (size_lg2)
                             {
@@ -3529,7 +3508,7 @@ static void *ios_mach_exception_thread( void *arg )
                             case 2:  old = __atomic_exchange_n((uint32_t *)rw_addr, (uint32_t)in, __ATOMIC_SEQ_CST); break;
                             default: old = __atomic_exchange_n((uint64_t *)rw_addr,           in, __ATOMIC_SEQ_CST); break;
                             }
-                            if (rt != 31) state.__x[rt] = old;  /* XZR discards the result */
+                            if (rt != 31) IOS_ARM64_REG(state, rt) = old;  /* XZR discards the result */
                             emulated = 1;
 
                             /* ml648: THIS is Mono's backpatcher, and this is the fault
@@ -4260,6 +4239,9 @@ skip_reclaim_band: ;
                                   (thread_state_t)&state, count );
             else
             {
+                if (req->exception == EXC_BAD_ACCESS)
+                    ios_capture_crash_context(&fault_entry_state, &state,
+                                               fault_addr, req->code[0]);
                 /* Rate-limit: log first 5 unhandled faults then every 100th */
                 static volatile int unhandled_count = 0;
                 int cnt = __sync_add_and_fetch(&unhandled_count, 1);
@@ -5783,6 +5765,8 @@ static void ios_install_task_exception_port(void)
 
     if (done || ios_exc_port == MACH_PORT_NULL) return;
     done = 1;
+    dprintf( 2, "[arm64-context] register-members-v1: FP/LR/SP use named Darwin members; "
+                 "data register 31 reads zero\n" );
 
     /* Opt-out only: this strictly removes a dependency on a port we do not own,
      * so it defaults ON. MADEIRA_TASK_EXC=0 restores the pre-ml522 behaviour for
@@ -8487,7 +8471,7 @@ static int ios_srcwatch_handle( const arm_thread_state64_t *st, uintptr_t addr )
             int off = 0, i;
             for (i = 0; i <= 30 && off < (int)sizeof(buf) - 24; i++)
                 off += snprintf( buf + off, sizeof(buf) - off, "%s%d=%llx",
-                                 i ? " x" : "x", i, (unsigned long long)st->__x[i] );
+                                 i ? " x" : "x", i, (unsigned long long)IOS_ARM64_REG(*st, i) );
             dprintf(STDERR_FILENO,
                 "[srcwatch]   #%d REGS writer=%d/%d guest_rip=%p fault=%p sp=%p lr=%p | %s rev=ml535\n",
                 n, slot, d, (void *)(uintptr_t)rip, (void *)addr,
@@ -10169,7 +10153,7 @@ static void ill_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 static inline uint64_t ios_get_reg(ucontext_t *ctx, int r)
 {
     if (r == 31) return 0;  /* XZR */
-    /* REGn_sig(0..30) works because __x[29]=__fp, __x[30]=__lr in memory layout */
+    /* FP/LR are named Darwin members; data register 31 is XZR. */
     return REGn_sig(r, ctx);
 }
 

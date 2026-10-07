@@ -48,3 +48,19 @@ EOF
 
 A file whose certificate offset equals its own length has had the signature
 truncated off and is no longer an unmodified Microsoft binary.
+
+## Check the packaged app
+
+Checking the resource files against an upstream IPA is insufficient: an upstream
+release can itself contain an empty `x86_64-vcruntime` folder. Verify all twelve
+files in the final IPA against the original extracted directory before delivery:
+
+```sh
+python3 tools/verify-vcruntime.py Madeira.ipa \
+  --reference app/Madeira/x86_64-vcruntime
+```
+
+This rejects missing files, duplicate ZIP entries, incorrect architectures,
+truncated certificate envelopes and changes from the reference files. It checks
+the certificate envelope, rather than cryptographically validating signer trust;
+obtain the reference files from the official Microsoft redistributable.

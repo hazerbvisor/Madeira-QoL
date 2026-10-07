@@ -172,6 +172,7 @@ struct LibraryEntry: Codable, Identifiable {
     var display: String?
     /// FPS limit: 1 = 60, 3 = 30, 0 = display maximum, 2 = uncapped (madeira_set_vsync_locked).
     var fpsMode = 1
+    var performanceUpgrade: PerformanceProfile?
     /// FEX's X87ReducedPrecision for this game. Off by default, as in FEX; only
     /// an explicit choice exports FEX_X87REDUCEDPRECISION=1.
     var reducedX87 = false
@@ -246,6 +247,42 @@ struct LibraryEntry: Codable, Identifiable {
 
     var displayMode: DisplayMode { display.flatMap(DisplayMode.init(rawValue:)) ?? .fit }
 
+    /// Native and guest DXMT Presenters share the intercepted drawable-texture
+    /// boundary. Their game resources and viewport dimensions remain unchanged.
+    var spatialCompatibilityIssue: String? {
+        let remote = MadeiraConfig.get("remote") ?? MadeiraConfig.get("env.DXMT_REMOTE_METAL")
+            ?? ProcessInfo.processInfo.environment["DXMT_REMOTE_METAL"] ?? ""
+        if !remote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Turn off Remote Metal to use MadeiraFX on this iPad."
+        }
+        if desktop == true { return "Open the game’s own library entry; MadeiraFX is unavailable for Wine Desktop." }
+        if bits != 32 && bits != 64 { return "The game entry needs a supported 32-bit or 64-bit executable." }
+        // Explicit per-game intent allows dynamic renderers that metadata cannot identify.
+        // Actual effects still require the local DXMT drawable hooks and GPU capabilities.
+        if let renderer = performanceUpgrade?.fxRenderer, renderer != .automatic { return nil }
+        let api = graphicsAPI?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if api.isEmpty { return "Auto detect has not identified the game’s renderer. Choose Direct3D 11 or 9 in Game renderer to match the renderer you use in-game." }
+        // Metadata lists every renderer the game can use, not the active one.
+        // Import and installation scans use different slash/whitespace formats.
+        let apis = Set(api.split(separator: "/").map { $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() })
+        if apis.isDisjoint(with: ["D3D9", "D3D11"]) {
+            return "Detected renderer: \(api). MadeiraFX requires local DXMT Direct3D 9 or 11."
+        }
+        return nil
+    }
+    var spatialCompatible: Bool { spatialCompatibilityIssue == nil }
+
+    /// A lower session monitor is a request to the game, not forced scaling of
+    /// its render targets. Games may choose another mode; telemetry reports it.
+    var sessionResolution: String {
+        guard spatialCompatible, let profile = performanceUpgrade, profile.fxMode != .off,
+              madeira_spatial_supported() != 0 else { return resolution }
+        let size = resolution.split(separator: "x").compactMap { Int($0) }
+        guard size.count == 2 else { return resolution }
+        let internalSize = profile.internalResolution(outputWidth: size[0], outputHeight: size[1])
+        return "\(internalSize.width)x\(internalSize.height)"
+    }
+
     var launchArguments: String {
         if desktop == true { return "/desktop=shell,\(resolution) C:\\windows\\system32\\services.exe" }
         if startsSteamGameDirectly { return steamProgramArguments ?? "" }
@@ -302,6 +339,7 @@ struct LibraryEntry: Codable, Identifiable {
     /// Runs on the launch worker, before the JIT pool is taken.
     func applyEnvironment() {
         configureLaunch()
+        RendererCaches.prepare(self)
         // Unset unless chosen: FEX's own default then applies, as for any other launch.
         if reducedX87 { setenv("FEX_X87REDUCEDPRECISION", "1", 1) } else { unsetenv("FEX_X87REDUCEDPRECISION") }
         // Exported only when chosen: unset keeps the engine's own default (and any
@@ -320,13 +358,21 @@ struct LibraryEntry: Codable, Identifiable {
             setenv("MADEIRA_FASTSYNC", fastSync == false ? "0" : mode, 1)
             setenv("MADEIRA_FASTSYNC_SEM", semaphoreFastPath == true ? "1" : "0", 1)
         }
-        madeira_set_vsync_locked(effectiveFPSMode)
+        let precise = (performanceUpgrade?.initialFPSCap ?? -1) >= 0 && madeira_performance_renderer_available() != 0
+        madeira_set_vsync_locked(precise ? 0 : effectiveFPSMode)
         fputs("[frontend] launch profile applied\n", stderr)
         LogStore.shared.log("[display-shape] resolution=\(resolution) mode=\(displayMode.rawValue)")
     }
 
     /// What the bridge starts. Set on the main thread before the session begins.
     func configureLaunch() {
+        let size = resolution.split(separator: "x").compactMap { Int($0) }
+        let validDisplay = size.count == 2 && (320...4096).contains(size[0]) && (240...4096).contains(size[1])
+        let fx = validDisplay && spatialCompatible && performanceUpgrade?.fxMode != nil && performanceUpgrade?.fxMode != .off
+        let interpolation = performanceUpgrade?.interpolation ?? .off
+        madeira_interpolation_configure(spatialCompatible && validDisplay ? (interpolation == .double ? 1 : interpolation == .auto ? 2 : 0) : 0)
+        let spatial = madeira_spatial_configure(fx ? 1 : 0, validDisplay ? Int32(size[0]) : 0, validDisplay ? Int32(size[1]) : 0) != 0
+        if spatial { setenv("DXMT_METALFX_SPATIAL_SWAPCHAIN", "0", 1) } // avoid two independent upscalers
         // "The game"'s identity and working folder for this launch only (the bridge
         // reads and clears them); every other launch starts without them.
         unsetenv("MADEIRA_STEAM_APPID"); unsetenv("MADEIRA_STEAM_APPPATH"); unsetenv("MADEIRA_WORKDIR")
@@ -335,7 +381,7 @@ struct LibraryEntry: Codable, Identifiable {
             // the virtual monitor follows this entry's Resolution, as below. "The game" starts
             // its own program below, like any library game.
             if !startsSteamGameDirectly {
-                GuestDisplay.configureSessionDefault(view: CGSize(width: 1280, height: 720), knob: resolution)
+                GuestDisplay.configureSessionDefault(view: CGSize(width: 1280, height: 720), knob: sessionResolution)
                 return
             }
         }
@@ -352,7 +398,7 @@ struct LibraryEntry: Codable, Identifiable {
         // Every session's virtual monitor takes this entry's Resolution
         // (MADEIRA_SCREEN_W/H, source "knob"); for the Desktop entry it is the
         // same size as its /desktop= argument.
-        GuestDisplay.configureSessionDefault(view: CGSize(width: 1280, height: 720), knob: resolution)
+        GuestDisplay.configureSessionDefault(view: CGSize(width: 1280, height: 720), knob: sessionResolution)
     }
 }
 
@@ -364,8 +410,12 @@ final class LibraryModel: ObservableObject {
     @Published var entries: [LibraryEntry] = []
     @Published var current: UUID?
     @Published var activeEntry: LibraryEntry?
-    @Published var menu = false
-    @Published var performance = false
+    @Published var menu = false {
+        didSet { if oldValue != menu { HardwareInput.shared.sessionFocusChanged(); PerformanceRuntime.shared.refresh() } }
+    }
+    @Published var performance = false {
+        didSet { if oldValue != performance { PerformanceRuntime.shared.refresh() } }
+    }
     @Published var liveLogs = false
     @Published var fpsMode = 1
     /// The session's controller mode (LibraryEntry.controllerMode): "keys" or nil.
@@ -389,7 +439,9 @@ final class LibraryModel: ObservableObject {
     }
     @Published var error: String?
     @Published var sessionMessage = ""
-    @Published var launching = false
+    @Published var launching = false {
+        didSet { if oldValue != launching { HardwareInput.shared.sessionFocusChanged(); PerformanceRuntime.shared.refresh() } }
+    }
     @Published var overlayFields = ["FPS", "Frame time", "RAM", "Battery"]
     private var launchPresent: UInt64 = 0
     private var launchSurface: UInt64 = 0
@@ -513,7 +565,7 @@ final class LibraryModel: ObservableObject {
     /// Install size and graphics API, at most once a day per entry.
     @MainActor
     func refreshMetadata(_ id: UUID) async {
-        let revision = 12
+        let revision = 13
         guard !metadataInFlight.contains(id), let entry = entries.first(where: { $0.id == id }), entry.desktop != true,
               entry.metadataRevision != revision || Date().timeIntervalSince(entry.metadataChecked ?? .distantPast) > 86400,
               let url = try? Self.executable(entry.relativePath) else { return }
@@ -720,7 +772,7 @@ final class LibraryModel: ObservableObject {
         launchPresent = madeira_get_present_count(); launchStarted = Date(); launchSlow = false; launchLogs = entry.liveLogs
         launchSurface = winios_surface_present_count()
         MetalBackedView.presentCountAtLaunch = launchPresent; laidOutAfterFirstPresent = false
-        launching = true; overlayFields = entry.overlayFields ?? ["FPS", "Frame time", "RAM", "Battery"]
+        launching = true; overlayFields = entry.overlayFields ?? ["FPS", "Frame time", "RAM", "Graphics", "Pressure", "FPS cap"]
         displayMode = entry.displayMode
         activeEntry = entry; current = entry.id; menu = false; performance = entry.performance; liveLogs = entry.liveLogs
         LogStore.shared.setDisplayActive(entry.liveLogs)
@@ -745,6 +797,12 @@ final class LibraryModel: ObservableObject {
         applyControllerMode()
         MetalHostView.shared.isHidden = false
         ProMotionIntent.apply(mode: entry.effectiveFPSMode)
+        ProMotionIntent.apply(cap: entry.performanceUpgrade?.fpsCap)
+        PerformanceRuntime.shared.begin(entry)
+        if let profile = entry.performanceUpgrade, profile.automaticPerformance {
+            ProMotionIntent.apply(cap: profile.initialFPSCap)
+        }
+        HardwareInput.shared.configureSession(entry.performanceUpgrade)
         if remember { var played = entry; played.lastPlayed = Date(); save(played) }
         launchDismissLogged = false
         DockStartScreen.shared.begin(dock, at: launchStarted)
@@ -826,6 +884,11 @@ final class LibraryModel: ObservableObject {
     private var controlsSink: AnyCancellable?
 
     func setFPS(_ mode: Int) {
+        if var profile = activeEntry?.performanceUpgrade {
+            profile.fpsCap = nil; profile.automaticPerformance = false; activeEntry?.performanceUpgrade = profile
+        }
+        madeira_performance_set_cap(-1)
+        PerformanceRuntime.shared.manualPacingSelected()
         fpsMode = mode
         let applied: Int32 = mode == 3 && !ProMotionIntent.has30Cap ? 1 : Int32(mode)
         madeira_set_vsync_locked(applied)
@@ -857,6 +920,7 @@ final class LibraryModel: ObservableObject {
             if ControlPresetsModel.enabled { entry.controlLayout = controls.layoutID }
             entry.touchControls = controls.visible
             entry.fpsMode = fpsMode; entry.performance = performance
+            entry.performanceUpgrade = activeEntry?.performanceUpgrade
             entry.overlayFields = overlayFields
             entry.controlOpacity = opacity; entry.controlSize = controls.sizeScale
             if GamepadInput.keyboardMouseAvailable { entry.controllerMode = controllerMode }
@@ -873,6 +937,7 @@ final class LibraryModel: ObservableObject {
         timer?.invalidate(); timer = nil
         saveCurrentProfile()
         controllerMode = nil
+        PerformanceRuntime.shared.stop()
         controllerBinds = [:]
         padMouseVertical = 1
         let controls = TouchControlsModel.shared
@@ -887,6 +952,9 @@ final class LibraryModel: ObservableObject {
         LibraryController.shared.configure(enabled: enabled, ownsInput: enabled)
         MetalHostView.shared.isHidden = true
         ProMotionIntent.shared.setActive(false)
+        RendererCaches.finish()
+        HardwareInput.shared.configureSession(nil)
+        madeira_performance_set_telemetry(0)
         fputs("[frontend] returned to library\n", stderr)
     }
 }
@@ -911,10 +979,48 @@ private actor LibraryMetadataScanner {
         let window = min(budget, 4 * 1024 * 1024)
         var result = Set<String>()
         let names = ["ddraw.dll", "d3d8.dll", "d3d9.dll", "d3d10.dll", "d3d10_1.dll", "d3d11.dll", "d3d12.dll", "opengl32.dll", "vulkan-1.dll"]
-        for offset in [UInt64(0), length > UInt64(window) ? length - UInt64(window) : 0] {
+        // PE read-only/data sections often sit between a large code section and
+        // resources. Prioritize these bounded probes before head/tail fallback.
+        func u32(_ bytes: Data, _ offset: Int) -> UInt32 {
+            guard offset >= 0, offset + 4 <= bytes.count else { return 0 }
+            return (0..<4).reduce(0) { $0 | UInt32(bytes[offset + $1]) << ($1 * 8) }
+        }
+        var probes: [(UInt64, Int)] = []
+        try? handle.seek(toOffset: 0)
+        if let dos = try? handle.read(upToCount: 64), dos.count == 64 {
+            let base = UInt64(u32(dos, 60))
+            if base <= length, length - base >= 24, base < 16 * 1024 * 1024 {
+                try? handle.seek(toOffset: base)
+                if let header = try? handle.read(upToCount: 24), header.count == 24, u32(header, 0) == 0x4550 {
+                    let count = Int(header[6]) | Int(header[7]) << 8
+                    let optionalSize = Int(header[20]) | Int(header[21]) << 8
+                    let start = base + 24 + UInt64(optionalSize)
+                    if count > 0, count <= 96, start <= length, UInt64(count * 40) <= length - start {
+                        try? handle.seek(toOffset: start)
+                        if let table = try? handle.read(upToCount: count * 40), table.count == count * 40 {
+                            for index in 0..<count {
+                                let row = index * 40
+                                let name = String(decoding: table[row..<(row + 8)].prefix(while: { $0 != 0 }), as: UTF8.self).lowercased()
+                                guard name.hasPrefix(".rdata") || name.hasPrefix(".data") else { continue }
+                                let offset = UInt64(u32(table, row + 20)), size = UInt64(u32(table, row + 16))
+                                guard offset > 0, size > 0, offset <= length, size <= length - offset else { continue }
+                                let bytes = min(window, Int(size))
+                                probes.append((offset, bytes))
+                                if size > UInt64(bytes) { probes.append((offset + size - UInt64(bytes), bytes)) }
+                                if probes.count >= 4 { break }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        probes += [(0, window), (length > UInt64(window) ? length - UInt64(window) : 0, window)]
+        var visited = Set<UInt64>()
+        for (offset, count) in probes {
             guard budget > 0, !Task.isCancelled else { break }
+            if !visited.insert(offset).inserted { continue }
             try? handle.seek(toOffset: offset)
-            guard let bytes = try? handle.read(upToCount: min(window, budget)) else { break }
+            guard let bytes = try? handle.read(upToCount: min(count, budget)) else { break }
             budget -= bytes.count
             let folded = Data(bytes.map { $0 >= 65 && $0 <= 90 ? $0 + 32 : $0 })
             for name in names {
@@ -924,7 +1030,6 @@ private actor LibraryMetadataScanner {
                     result.formUnion(LibraryModel.apiNames([name]))
                 }
             }
-            if length <= UInt64(window) { break }
         }
         return result
     }
@@ -1632,7 +1737,12 @@ private struct AmbientGlowCard: View {
 /// the full artwork.
 @MainActor
 enum AmbientArtwork {
-    private static let cache = NSCache<NSString, UIImage>()
+    private static let cache: NSCache<NSString, UIImage> = {
+        let value = NSCache<NSString, UIImage>()
+        value.countLimit = 64; value.totalCostLimit = 4 * 1024 * 1024
+        return value
+    }()
+    static func clear() { cache.removeAllObjects() }
 
     static func cached(_ id: String) -> UIImage? { cache.object(forKey: id as NSString) }
 
@@ -1653,11 +1763,12 @@ enum AmbientArtwork {
             }
         }
         guard let image, image.size.width > 0 else { return nil }
-        let size = CGSize(width: 96, height: (96 * image.size.height / image.size.width).rounded())
+        let ratio = min(96 / image.size.width, 384 / max(image.size.height, 1))
+        let size = CGSize(width: max(1, (image.size.width * ratio).rounded()), height: max(1, (image.size.height * ratio).rounded()))
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         let small = UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
-        cache.setObject(small, forKey: item.id as NSString)
+        cache.setObject(small, forKey: item.id as NSString, cost: Int(size.width * size.height) * 4)
         return small
     }
 
@@ -1870,6 +1981,49 @@ struct LibraryCells<Item: Identifiable, Cell: View>: View {
     }
 }
 
+/// This preference is consumed by the small native launcher before either
+/// runtime is loaded. It never changes the engine in an existing process.
+private struct RuntimeSelectionSettings: View {
+    private static var choiceFile: URL {
+        LibraryModel.documents.appendingPathComponent("madeira-runtime.txt")
+    }
+    private static var savedQoL: Bool {
+        (try? String(contentsOf: choiceFile, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)) == "qol"
+    }
+    @State private var useQoL = Self.savedQoL
+    @State private var notice: String?
+    private let available = ProcessInfo.processInfo.environment["MADEIRA_RUNTIME_SELECTOR"] == "1"
+    private let active = ProcessInfo.processInfo.environment["MADEIRA_ACTIVE_RUNTIME"] == "original"
+        ? "Original Madeira" : "Madeira-QoL"
+
+    var body: some View {
+        if available {
+            Section {
+                Toggle("Use Madeira-QoL", isOn: Binding(get: { useQoL }, set: { enabled in
+                    do {
+                        try (enabled ? "qol" : "original").write(to: Self.choiceFile, atomically: true, encoding: .utf8)
+                        useQoL = enabled
+                        notice = "Swipe Madeira away in the app switcher, then open it again to load \(enabled ? "Madeira-QoL" : "Original Madeira")."
+                    } catch {
+                        notice = "Could not save the runtime choice: " + error.localizedDescription
+                    }
+                }))
+                LabeledContent("Active runtime", value: active)
+            } header: {
+                Text("Runtime")
+            } footer: {
+                Text("Off loads the original Madeira v0.1.3 app and runtime, including its original interface. On enables the QoL build and MadeiraFX. Games and saves are shared. Switching requires restarting Madeira; a startup picker lets you switch back from either build.")
+            }
+            .alert("Madeira runtime", isPresented: Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })) {
+                Button("OK", role: .cancel) { notice = nil }
+            } message: {
+                Text(notice ?? "")
+            }
+        }
+    }
+}
+
 struct LibraryView: View {
     @ObservedObject private var model = LibraryModel.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -2023,6 +2177,9 @@ struct LibraryView: View {
                     Toggle("Extended logging", isOn: $input.diagnostics)
                 } header: { Text("Diagnostics") }
             }
+            if settingsShow("runtime", "original", "Madeira-QoL", "QoL", "features") {
+                RuntimeSelectionSettings()
+            }
             if settingsShow("pointer", "mouse", "cursor", "touch", "trackpad", "sensitivity") {
                 Section("Pointer") { LibraryPointerSettings() }
             }
@@ -2055,6 +2212,7 @@ struct LibraryView: View {
             if !settingsSearch.trimmingCharacters(in: .whitespaces).isEmpty {
                 SettingsSearchResults(query: settingsSearch.trimmingCharacters(in: .whitespaces), refresh: settingsRefresh)
             }
+            if settingsShow("cache", "shader", "pipeline", "performance") { RendererCacheSettings() }
             // Credits, last on the Settings page.
             if settingsShow("credits", "thanks", "Will Faust", "Nick", "125hz", "Jfishin", "Jesse", "JesseLovelace", "Dan Perks", "danperks") {
                 Section {
@@ -2420,6 +2578,7 @@ struct LibraryDetail: View {
                     }
                     FPSChoice(mode: $entry.fpsMode)
                 }
+                PerformanceProfileSettings(entry: $entry)
                 Section {
                     Toggle("Reduced-precision x87", isOn: $entry.reducedX87)
                     // Exported for this game only when chosen (applyEnvironment).
@@ -2519,7 +2678,12 @@ struct LibraryDetail: View {
                 Button("Remove", role: .destructive) { leaving = true; model.remove(entry.id); dismiss() }
             }
             .task {
-                if entry.graphicsAPI == nil, entry.desktop != true, let url = try? LibraryModel.executable(entry.relativePath) { entry.graphicsAPI = LibraryModel.graphicsImports(url) }
+                if entry.graphicsAPI == nil, entry.desktop != true, let url = try? LibraryModel.executable(entry.relativePath) {
+                    let path = entry.relativePath
+                    let result = await LibraryMetadataScanner.shared.scan(url, drive: LibraryModel.drive, countBytes: false)
+                    guard !Task.isCancelled, entry.relativePath == path, entry.graphicsAPI == nil else { return }
+                    entry.graphicsAPI = result.api
+                }
             }
             .onDisappear { if !leaving { model.save(entry) } }
             .onReceive(LibraryController.shared.commands) { command in
@@ -3086,7 +3250,6 @@ struct LibraryHUD: View {
         }.ignoresSafeArea()
         .onAppear { model.saveCurrentProfile() }
         .onChange(of: model.menu) { _, open in
-            LibraryController.shared.configure(enabled: model.enabled, ownsInput: open)
             if !open { bindsPage = false }
             if !open { model.saveCurrentProfile() }
         }
@@ -3266,7 +3429,7 @@ struct LibraryHUD: View {
                 Divider()
                 Toggle("Performance overlay", isOn: $model.performance)
                 if model.performance {
-                    ForEach(["FPS", "Frame time", "RAM", "Battery"], id: \.self) { field in
+                    ForEach(["FPS", "Frame time", "RAM", "Battery", "Graphics", "CPU/GPU", "Pressure", "FPS cap"], id: \.self) { field in
                         Toggle(field, isOn: Binding(get: { model.overlayFields.contains(field) }, set: { on in
                             model.overlayFields.removeAll { $0 == field }; if on { model.overlayFields.append(field) }
                         })).font(.subheadline)
@@ -3306,39 +3469,6 @@ struct LibraryLiveLogs: View {
             }.defaultScrollAnchor(.bottom).padding(8)
         }.background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.white)
             .accessibilityLabel("Live diagnostic log")
-    }
-}
-
-struct LibraryMetrics: View {
-    @ObservedObject private var model = LibraryModel.shared
-    @State private var lastCount: UInt64 = 0
-    @State private var lastTime = Date()
-    @State private var fps = 0.0
-    @State private var memory = 0
-    @State private var battery = -1
-    private let ticks = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    var body: some View {
-        Text(parts.joined(separator: "  ·  "))
-            .font(.caption.monospacedDigit().weight(.medium)).padding(.horizontal, 12).padding(.vertical, 8)
-            .background(.black.opacity(0.8), in: Capsule()).foregroundStyle(.white)
-            .onAppear { lastCount = madeira_get_present_count(); lastTime = Date(); UIDevice.current.isBatteryMonitoringEnabled = true }
-            .onDisappear { UIDevice.current.isBatteryMonitoringEnabled = false }
-            .onReceive(ticks) { now in
-                let count = madeira_get_present_count(); let dt = now.timeIntervalSince(lastTime)
-                fps = count >= lastCount ? Double(count - lastCount) / max(0.001, dt) : 0; lastCount = count; lastTime = now
-                var info = task_vm_info_data_t(); var size = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
-                let result = withUnsafeMutablePointer(to: &info) { $0.withMemoryRebound(to: integer_t.self, capacity: Int(size)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &size) } }
-                if result == KERN_SUCCESS { memory = Int(info.phys_footprint / 1048576) }
-                battery = UIDevice.current.batteryLevel < 0 ? -1 : Int(UIDevice.current.batteryLevel * 100)
-            }
-    }
-    private var parts: [String] {
-        var result: [String] = []
-        if model.overlayFields.contains("FPS") { result.append(String(format: "%.0f FPS", fps)) }
-        if model.overlayFields.contains("Frame time") { result.append(fps > 0 ? String(format: "%.1f ms avg", 1000 / fps) : "— ms") }
-        if model.overlayFields.contains("RAM") { result.append("\(memory) MB") }
-        if model.overlayFields.contains("Battery"), battery >= 0 { result.append("\(battery)%") }
-        return result
     }
 }
 
