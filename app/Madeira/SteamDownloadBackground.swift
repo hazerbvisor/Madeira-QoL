@@ -155,6 +155,15 @@ import UserNotifications
     }
 
     private func finishContinued(success: Bool) {
+        // The queue may finish before iOS starts the submitted request.
+        // Cancel it and reset our state so the next queue can submit again.
+        if continuedPending {
+            if let identifier = taskIdentifier {
+                BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: identifier)
+            }
+            continuedPending = false
+            log("cancelled unstarted continued-processing request")
+        }
         if #available(iOS 26.0, *), let task = continued as? BGContinuedProcessingTask {
             task.setTaskCompleted(success: success)
             log("continued-processing completed success=\(success ? 1 : 0)")
